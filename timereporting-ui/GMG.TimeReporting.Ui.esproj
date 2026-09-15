@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.VisualStudio.JavaScript.Sdk/1.0.1184077">
+  <PropertyGroup>
+    <!-- F5 / Debug starts the Vite dev server on http://localhost:4200 (see vite.config.ts). -->
+    <StartupCommand>npm run dev</StartupCommand>
+    <!-- Run `npm run build` (tsc -b && vite build) as part of a solution build so the UI is
+         type-checked alongside the API projects. -->
+    <ShouldRunBuildScript>true</ShouldRunBuildScript>
+    <!-- Matches the `build.outDir` in vite.config.ts, which npm run copy/deploy publish from. -->
+    <BuildOutputFolder>$(MSBuildProjectDirectory)\dist\TimeReporting</BuildOutputFolder>
+  </PropertyGroup>
+</Project>

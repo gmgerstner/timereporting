@@ -1,5 +1,6 @@
 <Solution>
-  <Project Path="../timereporting-api/GMG.TimeReporting.Core/GMG.TimeReporting.Core.csproj" />
-  <Project Path="../timereporting-api/GMG.TimeReporting.UnitTests/GMG.TimeReporting.UnitTests.csproj" />
-  <Project Path="../timereporting-api/GMG.TimeReporting.WebApi/GMG.TimeReporting.WebApi.csproj" />
+  <Project Path="timereporting-api/GMG.TimeReporting.Core/GMG.TimeReporting.Core.csproj" />
+  <Project Path="timereporting-api/GMG.TimeReporting.UnitTests/GMG.TimeReporting.UnitTests.csproj" />
+  <Project Path="timereporting-api/GMG.TimeReporting.WebApi/GMG.TimeReporting.WebApi.csproj" />
+  <Project Path="timereporting-ui/GMG.TimeReporting.Ui.esproj" />
 </Solution>
