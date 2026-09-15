@@ -59,12 +59,16 @@ open and contributes no hours, and `SUM` skips nulls unless every value is null.
 dotnet run --project GMG.TimeReporting.WebApi
 ```
 
-On a Development machine, startup seeds two log-ins the first time it finds no Time Reporting
-entry in the archive — `admin` / `admin` (an admin) and `user` / `user` (a plain account) — so a
-fresh clone is usable straight away. This seeds credentials; it does not weaken the check on
-them. The password is verified against the archive in every environment, there is no bypass
-flag, and nothing is seeded outside Development or into an archive that already has a Time
-Reporting entry.
+On a Development machine, startup builds a local stand-in password archive if there is not one
+already and seeds two log-ins into it — `admin` / `admin` (an admin) and `user` / `user` (a plain
+account) — so a fresh clone is usable without a copy of the security application's database.
+This is the only thing in the app that writes to the archive at all, and the only environment it
+happens in; see [Password archive database](#password-archive-database).
+
+It seeds credentials; it does not weaken the check on them. The password is verified against the
+archive in every environment and there is no bypass flag. It also stops at the first sign of a
+real archive: an existing database is never created over, and one that already holds a Time
+Reporting entry is left completely alone.
 
 Swagger UI is served at `/swagger`. The `http` and `https` launch profiles are in
 `GMG.TimeReporting.WebApi/Properties/launchSettings.json`; the `https` profile listens on
@@ -104,25 +108,34 @@ at a database that already has real users in it.
 
 ### Database
 
-**The API provisions its own databases on startup.** All that has to exist beforehand is a
+**The API provisions its own database on startup** — the Time Reporting one. The password
+archive is not its to create; see
+[Password archive database](#password-archive-database). All that has to exist beforehand is a
 PostgreSQL server and a login role that may create databases:
 
 ```sql
 CREATE ROLE timereporting LOGIN CREATEDB PASSWORD '<a strong password>';
 ```
 
-Point the two connection strings at that role and start the API. `ProvisionDatabasesAsync` in
-`Program.cs` then:
+Point `ConnectionStrings:DefaultConnection` at that role, point
+`ConnectionStrings:PasswordArchiveConnection` at the security application's existing archive
+(whatever credentials that application expects, so long as they can read it), and start the API.
+`ProvisionDatabasesAsync` in `Program.cs` then:
 
 - creates the `timereporting` database if the server does not have it, and applies every outstanding
   migration — so a first run builds the schema and a later deploy picks up new migrations;
-- creates the `passwordarchive` database from the model if it is missing (see
+- checks that the `passwordarchive` database can be reached, and warns if it cannot. It is never
+  created or written to outside Development (see
   [Password archive database](#password-archive-database)).
 
 Both steps are no-ops once everything is in place, so restarts cost a couple of round trips and log
-nothing. The `CREATEDB` privilege is only needed for the run that creates the databases; you can
-revoke it afterwards with `ALTER ROLE timereporting NOCREATEDB` and the API will keep working.
-Without it, a first run fails fast with `42501: permission denied to create database`.
+nothing.
+
+`CREATEDB` is only needed for the run that creates the Time Reporting database; without it, a
+first run fails fast with `42501: permission denied to create database`. Afterwards you can
+revoke it — `ALTER ROLE timereporting NOCREATEDB` — and the API keeps working. Access to the
+archive is only ever read access; granting this role anything more than `SELECT` on it is
+unnecessary.
 
 `InitialCreate` is the whole Time Reporting schema: `CommonTasks`, `TimeEntries` and the `StartTime`
 index. It targets PostgreSQL only — the SQL Server migrations it replaced are in git history, and
@@ -202,13 +215,23 @@ the same 404 as anyone else. Admin is not a way to clock time on another person'
 
 #### Password archive database
 
-Logins are checked against a second database, `passwordarchive`, which belongs to the separate
-security application. EF Core migrations do not own it, so startup uses `EnsureCreated` rather than
-`Migrate`: it builds the database from `PasswordArchiveContext` when the database is missing and
-does nothing at all when it already exists. That means it will not fight the security application
-over a database that app created, but it also means that if this API gets there first, the archive
-is created with only the tables and columns this API models. Where the security application owns
-the archive, let it create the database before the API's first run.
+Logins are checked against a second database, `passwordarchive`, which belongs to a separate
+web application. **Time Reporting only reads from it.** It never creates it, never migrates it
+and never writes to it — point
+`ConnectionStrings:PasswordArchiveConnection` at the security application's existing database
+and leave the schema to that application. If the database cannot be reached, startup logs a
+warning and logins fail; nothing is created to paper over it.
+
+That rule is enforced rather than merely intended. `PasswordArchiveContext` overrides
+`SaveChanges`/`SaveChangesAsync` to throw, and reads run with `QueryTrackingBehavior.NoTracking`
+so there is nothing tracked for a stray save to flush. `PasswordArchiveTests` pins both.
+
+The single exception is local development, described under [Running locally](#running-locally):
+on a Development machine with no archive to borrow, startup builds a local stand-in and seeds
+two log-ins into it, through the one clearly-named escape hatch
+(`SaveDevelopmentSeedDataAsync`). It creates nothing if the database already exists and writes
+nothing if the archive already holds a Time Reporting entry, so pointing a Development run at a
+real archive leaves it untouched too.
 
 Remaining setup:
 

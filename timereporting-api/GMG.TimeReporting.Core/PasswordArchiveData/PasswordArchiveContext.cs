@@ -18,11 +18,48 @@ namespace GMG.TimeReporting.Core.PasswordArchiveData
         public virtual DbSet<Password> Passwords { get; set; } = null!;
         public virtual DbSet<SystemUser> SystemUsers { get; set; } = null!;
 
+        protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+        {
+            // Nothing read out of the archive is ever edited, so there is no reason to pay
+            // for change tracking — and no tracked entity for a stray SaveChanges to write.
+            optionsBuilder.UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking);
+        }
+
         protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
         {
             configurationBuilder.Properties<DateTime>()
                 .HaveConversion<UnspecifiedKindConverter>();
         }
+
+        /// <inheritdoc />
+        /// <exception cref="InvalidOperationException">Always.</exception>
+        public override int SaveChanges(bool acceptAllChangesOnSuccess) =>
+            throw ReadOnly();
+
+        /// <inheritdoc />
+        /// <exception cref="InvalidOperationException">Always.</exception>
+        public override Task<int> SaveChangesAsync(
+            bool acceptAllChangesOnSuccess,
+            CancellationToken cancellationToken = default) =>
+            throw ReadOnly();
+
+        /// <summary>
+        /// Writes seed data into a local stand-in archive. Development only.
+        /// </summary>
+        /// <remarks>
+        /// The one sanctioned exception to this context being read-only. It exists so a
+        /// developer can get a working log-in on a machine that has no archive, and is called
+        /// from exactly one place: the Development seeding in <c>Program.cs</c>. Anything
+        /// that runs against a real archive must go through the ordinary
+        /// <see cref="SaveChanges()"/>, which refuses.
+        /// </remarks>
+        public Task<int> SaveDevelopmentSeedDataAsync(CancellationToken cancellationToken = default) =>
+            // base. dispatches non-virtually, so this deliberately steps past the override above.
+            base.SaveChangesAsync(acceptAllChangesOnSuccess: true, cancellationToken);
+
+        private static InvalidOperationException ReadOnly() =>
+            new("The PasswordArchive database belongs to the security application; this app only "
+                + "reads from it. Development seeding uses SaveDevelopmentSeedDataAsync instead.");
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {

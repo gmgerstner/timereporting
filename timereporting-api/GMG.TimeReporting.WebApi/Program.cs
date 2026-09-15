@@ -138,37 +138,48 @@ static async Task ProvisionDatabasesAsync(WebApplication app)
     // Creates the database first if it is missing, then applies whatever is outstanding.
     await timeReporting.Database.MigrateAsync();
 
-    // The password archive has no migrations of its own — the schema belongs to the
-    // separate security application. EnsureCreated builds it from the model when the
-    // database is missing and does nothing whatsoever when it already exists, so it
-    // will not fight with the security application over a database that app created.
+    // The password archive belongs to the security application. This app only reads it, so
+    // outside Development it is never created, migrated or written to — it is simply expected
+    // to be there. Checking now turns a misconfigured connection string into a startup warning
+    // instead of a puzzling failure at someone's first login attempt.
     var passwordArchive = scope.ServiceProvider.GetRequiredService<PasswordArchiveContext>();
-    if (await passwordArchive.Database.EnsureCreatedAsync())
-    {
-        logger.LogInformation("Created the password archive database from the model.");
-    }
 
     if (app.Environment.IsDevelopment())
     {
-        await SeedDevelopmentUsersAsync(passwordArchive, timeReporting, logger);
+        await SeedDevelopmentArchiveAsync(passwordArchive, timeReporting, logger);
+    }
+    else if (!await passwordArchive.Database.CanConnectAsync())
+    {
+        logger.LogWarning(
+            "Cannot reach the password archive database. Logins will fail until "
+            + "ConnectionStrings:PasswordArchiveConnection points at the security "
+            + "application's database. This app never creates it.");
     }
 }
 
 /// <summary>
-/// Gives a Development machine two accounts to sign in with, so a fresh clone is usable
-/// without hand-writing archive rows first.
+/// Builds a local stand-in password archive and gives it two accounts to sign in with, so a
+/// fresh clone is usable without a copy of the security application's database.
 /// </summary>
 /// <remarks>
-/// This seeds credentials; it does not weaken the check on them. Logging in always
-/// verifies the supplied password against the archive, in every environment. Nothing here
-/// runs outside Development, and it does nothing at all once the archive already has a
-/// Time Reporting entry — so it cannot touch a real archive.
+/// This is the only place in the app that writes to the archive at all, and it runs in
+/// Development only. It seeds credentials; it does not weaken the check on them — logging in
+/// verifies the supplied password against the archive in every environment. It also stops at
+/// the first sign of a real archive: an existing database is never created over, and one that
+/// already holds a Time Reporting entry is left completely alone.
 /// </remarks>
-static async Task SeedDevelopmentUsersAsync(
+static async Task SeedDevelopmentArchiveAsync(
     PasswordArchiveContext passwordArchive,
     TimeReportingContext timeReporting,
     ILogger logger)
 {
+    // Creates the database only when it is missing; returns false and writes nothing when
+    // the developer already has a real archive to point at.
+    if (await passwordArchive.Database.EnsureCreatedAsync())
+    {
+        logger.LogInformation("Created a Development password archive database from the model.");
+    }
+
     var url = AuthenticationController.TimeReportingUrl;
 
     if (await passwordArchive.Passwords.AnyAsync(p => p.Url == url))
@@ -200,7 +211,7 @@ static async Task SeedDevelopmentUsersAsync(
         });
     }
 
-    await passwordArchive.SaveChangesAsync();
+    await passwordArchive.SaveDevelopmentSeedDataAsync();
 
     // "admin" is the one that gets the role; "user" is a plain account to test isolation
     // against. Login creates local rows on its own, but not with IsAdmin set.
