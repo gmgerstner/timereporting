@@ -173,6 +173,13 @@ static async Task SeedDevelopmentArchiveAsync(
     TimeReportingContext timeReporting,
     ILogger logger)
 {
+    const string developmentSystemUsername = "development";
+
+    // Username and password are the same string, purely so they are easy to remember.
+    // "admin" is the one that gets the role; "user" is a plain account to test isolation
+    // against, and to give the admin's user picker someone to pick.
+    string[] devUsernames = ["admin", "user"];
+
     // Creates the database only when it is missing; returns false and writes nothing when
     // the developer already has a real archive to point at.
     if (await passwordArchive.Database.EnsureCreatedAsync())
@@ -181,52 +188,76 @@ static async Task SeedDevelopmentArchiveAsync(
     }
 
     var url = AuthenticationController.TimeReportingUrl;
+    var now = DateTime.Now;
 
-    if (await passwordArchive.Passwords.AnyAsync(p => p.Url == url))
+    if (!await passwordArchive.Passwords.AnyAsync(p => p.Url == url))
+    {
+        var systemUser = new SystemUser
+        {
+            SystemUsername = developmentSystemUsername,
+            HashedSystemPassword = new string('0', 64)
+        };
+
+        foreach (var name in devUsernames)
+        {
+            passwordArchive.Passwords.Add(new Password
+            {
+                SystemUser = systemUser,
+                Title = $"Time Reporting ({name})",
+                Username = name,
+                PasswordValue = name,
+                Url = url,
+                CreatedDate = now,
+                LastModifiedDate = now
+            });
+        }
+
+        await passwordArchive.SaveDevelopmentSeedDataAsync();
+
+        logger.LogWarning(
+            "Seeded Development log-ins: {Usernames} (password same as username). Development only.",
+            string.Join(", ", devUsernames));
+    }
+
+    // Local user rows are normally created by logging in, which means a seeded account does
+    // not exist — and so cannot be picked in the admin's "Viewing" list — until someone has
+    // actually signed in as it. Create them up front so a fresh clone has something to look
+    // at, and so "admin" really is an admin rather than the plain account login would make.
+    //
+    // Only for an archive this seeder built. A real archive is owned by the security
+    // application's own system users, never by a row we invented called "development", so
+    // pointing a Development run at the real thing grants nobody anything here.
+    var isSeededArchive = await passwordArchive.Passwords
+        .AnyAsync(p => p.Url == url && p.SystemUser.SystemUsername == developmentSystemUsername);
+    if (!isSeededArchive)
     {
         return;
     }
 
-    var systemUser = new SystemUser
-    {
-        SystemUsername = "development",
-        HashedSystemPassword = new string('0', 64)
-    };
+    var existing = await timeReporting.Users
+        .Where(u => devUsernames.Contains(u.Username))
+        .Select(u => u.Username)
+        .ToListAsync();
 
-    // Username and password are the same string, purely so they are easy to remember.
-    string[] devUsernames = ["admin", "user"];
-    var now = DateTime.Now;
-
-    foreach (var name in devUsernames)
+    var missing = devUsernames.Except(existing).ToList();
+    if (missing.Count == 0)
     {
-        passwordArchive.Passwords.Add(new Password
-        {
-            SystemUser = systemUser,
-            Title = $"Time Reporting ({name})",
-            Username = name,
-            PasswordValue = name,
-            Url = url,
-            CreatedDate = now,
-            LastModifiedDate = now
-        });
+        return;
     }
 
-    await passwordArchive.SaveDevelopmentSeedDataAsync();
-
-    // "admin" is the one that gets the role; "user" is a plain account to test isolation
-    // against. Login creates local rows on its own, but not with IsAdmin set.
-    if (!await timeReporting.Users.AnyAsync(u => u.Username == "admin"))
+    foreach (var name in missing)
     {
         timeReporting.Users.Add(new User
         {
-            Username = "admin",
-            IsAdmin = true,
+            Username = name,
+            IsAdmin = name == "admin",
             CreatedDate = now
         });
-        await timeReporting.SaveChangesAsync();
     }
 
-    logger.LogWarning(
-        "Seeded Development log-ins: {Usernames} (password same as username). Development only.",
-        string.Join(", ", devUsernames));
+    await timeReporting.SaveChangesAsync();
+
+    logger.LogInformation(
+        "Created Development user rows: {Usernames}.",
+        string.Join(", ", missing));
 }

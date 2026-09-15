@@ -36,7 +36,7 @@ function withImpliedEndTimes(entries: TimeEntry[]): TimeEntry[] {
 }
 
 export function HomePage() {
-  const { isAdmin } = useAuth();
+  const { username, isAdmin } = useAuth();
 
   const [currentTitle, setCurrentTitle] = useState('');
   const [commonTitles, setCommonTitles] = useState<string[]>([]);
@@ -208,6 +208,10 @@ export function HomePage() {
   const totalHours = timeSheetEntries.reduce((sum, entry) => sum + (entry.totalHours ?? 0), 0);
   const viewedUsername = users.find((user) => user.userId === viewedUserId)?.username ?? '';
 
+  // "My own time" already covers the signed-in user, and picking yourself out of the list
+  // would otherwise show your own data behind the read-only banner.
+  const otherUsers = users.filter((user) => user.username !== username);
+
   return (
     <Container>
       {error && <div className="alert alert-danger mt-3">{error}</div>}
@@ -228,7 +232,7 @@ export function HomePage() {
                   onChange={(event) => void changeViewedUser(event.target.value)}
                 >
                   <option value="">My own time</option>
-                  {users.map((user) => (
+                  {otherUsers.map((user) => (
                     <option key={user.userId} value={user.userId}>
                       {user.username}
                     </option>
@@ -236,6 +240,12 @@ export function HomePage() {
                 </Form.Select>
               </Col>
             </Row>
+            {otherUsers.length === 0 && (
+              <div className="text-muted mt-2">
+                Nobody else to show yet. A person appears here once they have signed in at least
+                once, which is what creates their Time Reporting account.
+              </div>
+            )}
             {isViewingOther && (
               <div className="text-muted mt-2">
                 Read-only view of {viewedUsername}’s time. Switch back to “My own time” to make

@@ -65,10 +65,16 @@ account) — so a fresh clone is usable without a copy of the security applicati
 This is the only thing in the app that writes to the archive at all, and the only environment it
 happens in; see [Password archive database](#password-archive-database).
 
+It also creates the matching `Users` rows up front — including `IsAdmin` on `admin` — rather
+than waiting for each account's first sign-in, so the admin's "Viewing" picker has someone in it
+straight away.
+
 It seeds credentials; it does not weaken the check on them. The password is verified against the
 archive in every environment and there is no bypass flag. It also stops at the first sign of a
-real archive: an existing database is never created over, and one that already holds a Time
-Reporting entry is left completely alone.
+real archive: an existing database is never created over, one that already holds a Time
+Reporting entry gets no new credentials, and the `Users` rows are only created for an archive
+this seeder built — recognised by the `development` system user that owns its rows — so
+pointing a Development run at the real archive grants nobody anything.
 
 Swagger UI is served at `/swagger`. The `http` and `https` launch profiles are in
 `GMG.TimeReporting.WebApi/Properties/launchSettings.json`; the `https` profile listens on
@@ -209,7 +215,10 @@ UPDATE "Users" SET "IsAdmin" = true WHERE "Username" = 'someone';
 ```
 
 An admin may read any user's schedule and timesheet — the UI shows them a "Viewing" picker —
-and may list users through `Users/GetUsers`. That is the whole of it: the write endpoints
+and may list users through `Users/GetUsers`. Both work off the `Users` table, so **a person
+shows up in the picker once they have signed in at least once**, which is the moment their row
+is created. Someone who has never logged in has no account here and no entries to look at; if a
+colleague is missing from the list, that is why. That is the whole of it: the write endpoints
 resolve an entry by id *and* owner, so an admin editing or deleting someone else's entry gets
 the same 404 as anyone else. Admin is not a way to clock time on another person's behalf.
 
