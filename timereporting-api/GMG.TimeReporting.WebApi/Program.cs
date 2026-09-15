@@ -1,5 +1,6 @@
 using GMG.TimeReporting.Core.PasswordArchiveData;
 using GMG.TimeReporting.Core.TimeReportingData;
+using GMG.TimeReporting.WebApi.Controllers;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -40,12 +41,22 @@ builder.Services
     {
         options.RequireHttpsMetadata = false;
         options.SaveToken = true;
+
+        // Off by default this would be true, which renames inbound "role" and "sub" to the
+        // long WS-Federation claim types. The RoleClaimType below would then be looking for
+        // a claim name that no longer exists, and every [Authorize(Roles = ...)] check would
+        // quietly 403 despite a token that plainly carries the role. Keeping the claims under
+        // the names the token actually uses is what makes the two agree.
+        options.MapInboundClaims = false;
+
         options.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuerSigningKey = true,
             IssuerSigningKey = signingKey,
             ValidateIssuer = false,
-            ValidateAudience = false
+            ValidateAudience = false,
+            NameClaimType = "username",
+            RoleClaimType = "role"
         };
     });
 builder.Services.AddAuthorization();
@@ -136,4 +147,75 @@ static async Task ProvisionDatabasesAsync(WebApplication app)
     {
         logger.LogInformation("Created the password archive database from the model.");
     }
+
+    if (app.Environment.IsDevelopment())
+    {
+        await SeedDevelopmentUsersAsync(passwordArchive, timeReporting, logger);
+    }
+}
+
+/// <summary>
+/// Gives a Development machine two accounts to sign in with, so a fresh clone is usable
+/// without hand-writing archive rows first.
+/// </summary>
+/// <remarks>
+/// This seeds credentials; it does not weaken the check on them. Logging in always
+/// verifies the supplied password against the archive, in every environment. Nothing here
+/// runs outside Development, and it does nothing at all once the archive already has a
+/// Time Reporting entry — so it cannot touch a real archive.
+/// </remarks>
+static async Task SeedDevelopmentUsersAsync(
+    PasswordArchiveContext passwordArchive,
+    TimeReportingContext timeReporting,
+    ILogger logger)
+{
+    var url = AuthenticationController.TimeReportingUrl;
+
+    if (await passwordArchive.Passwords.AnyAsync(p => p.Url == url))
+    {
+        return;
+    }
+
+    var systemUser = new SystemUser
+    {
+        SystemUsername = "development",
+        HashedSystemPassword = new string('0', 64)
+    };
+
+    // Username and password are the same string, purely so they are easy to remember.
+    string[] devUsernames = ["admin", "user"];
+    var now = DateTime.Now;
+
+    foreach (var name in devUsernames)
+    {
+        passwordArchive.Passwords.Add(new Password
+        {
+            SystemUser = systemUser,
+            Title = $"Time Reporting ({name})",
+            Username = name,
+            PasswordValue = name,
+            Url = url,
+            CreatedDate = now,
+            LastModifiedDate = now
+        });
+    }
+
+    await passwordArchive.SaveChangesAsync();
+
+    // "admin" is the one that gets the role; "user" is a plain account to test isolation
+    // against. Login creates local rows on its own, but not with IsAdmin set.
+    if (!await timeReporting.Users.AnyAsync(u => u.Username == "admin"))
+    {
+        timeReporting.Users.Add(new User
+        {
+            Username = "admin",
+            IsAdmin = true,
+            CreatedDate = now
+        });
+        await timeReporting.SaveChangesAsync();
+    }
+
+    logger.LogWarning(
+        "Seeded Development log-ins: {Usernames} (password same as username). Development only.",
+        string.Join(", ", devUsernames));
 }

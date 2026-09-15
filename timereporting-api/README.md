@@ -19,6 +19,11 @@ creates both databases for itself — see [Database](#database). The old `GMG.Ti
 `GMG.TimeReporting.WinUI` WinForms client and its `GMG.TimeReporting.Library` data library have been
 removed; their history is still in git, as is the SQL Server version of the schema.
 
+The app is **multi-user**. Every time entry and every favourite task belongs to a row in
+`Users`, and each signed-in user only ever reads and writes their own. Users flagged
+`IsAdmin` may additionally *read* anyone's schedule and timesheet; nothing lets anyone write
+to another user's entries. See [Users and admins](#users-and-admins).
+
 Entity and column names keep their PascalCase spelling, so EF quotes them. Hand-written `psql`
 queries have to quote them too: `SELECT * FROM "TimeEntries";`, not `SELECT * FROM TimeEntries;`.
 
@@ -54,6 +59,13 @@ open and contributes no hours, and `SUM` skips nulls unless every value is null.
 dotnet run --project GMG.TimeReporting.WebApi
 ```
 
+On a Development machine, startup seeds two log-ins the first time it finds no Time Reporting
+entry in the archive — `admin` / `admin` (an admin) and `user` / `user` (a plain account) — so a
+fresh clone is usable straight away. This seeds credentials; it does not weaken the check on
+them. The password is verified against the archive in every environment, there is no bypass
+flag, and nothing is seeded outside Development or into an archive that already has a Time
+Reporting entry.
+
 Swagger UI is served at `/swagger`. The `http` and `https` launch profiles are in
 `GMG.TimeReporting.WebApi/Properties/launchSettings.json`; the `https` profile listens on
 `https://localhost:44352`, which is what the UI's `.env.development` expects.
@@ -76,9 +88,12 @@ dotnet user-secrets set "ConnectionStrings:DefaultConnection" "<connection strin
 dotnet test GMG.TimeReporting.UnitTests
 ```
 
-The database-backed test is skipped unless the `TIMEREPORTING_TEST_CONNECTION` environment
-variable holds an Npgsql connection string for a Time Reporting database, for example
-`Host=localhost;Database=timereporting;Username=postgres;Password=...`.
+The database-backed tests — including `MultiUserTests`, which pins that one user's queries
+cannot see another's rows — are skipped unless the `TIMEREPORTING_TEST_CONNECTION`
+environment variable holds an Npgsql connection string for a Time Reporting database, for
+example `Host=localhost;Database=timereporting;Username=postgres;Password=...`. They create
+their own users with randomised names and delete them afterwards, so they are safe to point
+at a database that already has real users in it.
 
 
 ## Installation
@@ -115,6 +130,25 @@ there is no path that upgrades a SQL Server database in place. Moving an existin
 instance means exporting its `CommonTasks` and `TimeEntries` rows and loading them into the new
 database separately.
 
+#### Upgrading a database created before multi-user
+
+`AddUsers` puts a `NOT NULL` `UserId` on `TimeEntries` and `CommonTasks` with a foreign key to
+the new `Users` table. Existing rows have no owner to point at, so on a database that already
+holds entries the migration stops with:
+
+```
+23503: insert or update on table "TimeEntries" violates foreign key constraint
+```
+
+It runs in a transaction and rolls back completely, leaving the database exactly as it was —
+no half-applied schema. Since no data is being carried across, clear the old rows (or drop the
+database and let startup rebuild it) and run it again:
+
+```sql
+DELETE FROM "TimeEntries";
+DELETE FROM "CommonTasks";
+```
+
 #### Applying migrations by hand
 
 If you would rather control when the schema changes, the same migrations apply from the command
@@ -143,6 +177,29 @@ To change the schema, edit the entities and `OnModelCreating`, then:
 dotnet ef migrations add <Name> --project GMG.TimeReporting.Core --startup-project GMG.TimeReporting.WebApi --context TimeReportingContext
 ```
 
+#### Users and admins
+
+Logging in checks the supplied password against the PasswordArchive row whose `URL` is
+`https://timereporting.gmgdesk.com`, matching the username case-insensitively. Nothing in
+this app creates those credentials — add them through the security application.
+
+The Time Reporting database keeps its own small `Users` table alongside. It holds no
+credentials: just a `UserId` for the rest of the schema to key off, the (lower-cased)
+username, and `IsAdmin`. **The row is created automatically on first successful login**, so
+adding a person is only ever a matter of giving them archive credentials and having them
+sign in once.
+
+New users are never admins. Promote one afterwards:
+
+```sql
+UPDATE "Users" SET "IsAdmin" = true WHERE "Username" = 'someone';
+```
+
+An admin may read any user's schedule and timesheet — the UI shows them a "Viewing" picker —
+and may list users through `Users/GetUsers`. That is the whole of it: the write endpoints
+resolve an entry by id *and* owner, so an admin editing or deleting someone else's entry gets
+the same 404 as anyone else. Admin is not a way to clock time on another person's behalf.
+
 #### Password archive database
 
 Logins are checked against a second database, `passwordarchive`, which belongs to the separate
@@ -157,9 +214,11 @@ Remaining setup:
 
 - The API's PostgreSQL role owns the databases it creates, so it already has read and write access.
   The old EXECUTE grant on the stored procedures is no longer needed — there are none.
-- Add the necessary entry to the security application for logging in (steps not included here).
-- Populate a few common tasks in the CommonTasks table. The titles the retired `GetRecentTasks`
-  procedure treated as favourites were: Team meeting, Admin, Daily Scrum, Qualtrax.
+- Add each person's entry to the security application for logging in (steps not included here),
+  then see [Users and admins](#users-and-admins) below.
+- Optionally populate each user's favourites in `CommonTasks`. They are per-user now, so the rows
+  need a `UserId`. The titles the retired `GetRecentTasks` procedure treated as favourites were:
+  Team meeting, Admin, Daily Scrum, Qualtrax.
 
 ### API Code
 

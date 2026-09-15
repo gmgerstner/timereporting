@@ -20,6 +20,7 @@ namespace GMG.TimeReporting.Core.TimeReportingData
 
         public virtual DbSet<CommonTask> CommonTasks { get; set; } = null!;
         public virtual DbSet<TimeEntry> TimeEntries { get; set; } = null!;
+        public virtual DbSet<User> Users { get; set; } = null!;
 
         protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
         {
@@ -29,6 +30,25 @@ namespace GMG.TimeReporting.Core.TimeReportingData
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
+            modelBuilder.Entity<User>(entity =>
+            {
+                entity.ToTable("Users");
+
+                entity.HasKey(e => e.UserId);
+
+                entity.Property(e => e.UserId).UseIdentityByDefaultColumn();
+
+                entity.Property(e => e.Username)
+                    .IsRequired()
+                    .HasMaxLength(50);
+
+                // Usernames are stored lower-cased, so a plain unique index is enough to
+                // keep one person from ending up with two accounts.
+                entity.HasIndex(e => e.Username).IsUnique();
+
+                entity.Property(e => e.CreatedDate).HasColumnType("timestamp without time zone");
+            });
+
             modelBuilder.Entity<CommonTask>(entity =>
             {
                 entity.ToTable("CommonTasks");
@@ -40,6 +60,14 @@ namespace GMG.TimeReporting.Core.TimeReportingData
                 entity.Property(e => e.Title)
                     .IsRequired()
                     .HasMaxLength(100);
+
+                entity.HasOne(e => e.User)
+                    .WithMany(u => u.CommonTasks)
+                    .HasForeignKey(e => e.UserId)
+                    .OnDelete(DeleteBehavior.Cascade);
+
+                // Each user keeps their own favourites, and the picker reads the whole list.
+                entity.HasIndex(e => e.UserId);
             });
 
             modelBuilder.Entity<TimeEntry>(entity =>
@@ -59,8 +87,14 @@ namespace GMG.TimeReporting.Core.TimeReportingData
 
                 entity.Property(e => e.EndTime).HasColumnType("timestamp without time zone");
 
-                // The daily timesheet and schedule queries both filter and sort on StartTime.
-                entity.HasIndex(e => e.StartTime);
+                entity.HasOne(e => e.User)
+                    .WithMany(u => u.TimeEntries)
+                    .HasForeignKey(e => e.UserId)
+                    .OnDelete(DeleteBehavior.Cascade);
+
+                // The daily timesheet and schedule queries both filter and sort on StartTime,
+                // and now always within one user, so the user column leads the index.
+                entity.HasIndex(e => new { e.UserId, e.StartTime });
             });
 
             OnModelCreatingPartial(modelBuilder);
