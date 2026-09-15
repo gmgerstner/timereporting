@@ -1,0 +1,43 @@
+{
+   "CodeGenerationMode": 2,
+   "ContextClassName": "TimeReportingContext",
+   "ContextNamespace": null,
+   "DefaultDacpacSchema": null,
+   "FilterSchemas": false,
+   "IncludeConnectionString": false,
+   "ModelNamespace": null,
+   "OutputContextPath": "TimeReportingData",
+   "OutputPath": "TimeReportingData",
+   "ProjectRootNamespace": "GMG.TimeReporting.Core",
+   "Schemas": null,
+   "SelectedHandlebarsLanguage": 0,
+   "SelectedToBeGenerated": 0,
+   "Tables": [
+      {
+         "Name": "[dbo].[CommonTasks]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[TimeEntries]",
+         "ObjectType": 0
+      }
+   ],
+   "UiHint": "DARMIK.TimeReporting",
+   "UseBoolPropertiesWithoutDefaultSql": false,
+   "UseDatabaseNames": true,
+   "UseDbContextSplitting": false,
+   "UseFluentApiOnly": true,
+   "UseHandleBars": false,
+   "UseHierarchyId": false,
+   "UseInflector": true,
+   "UseLegacyPluralizer": false,
+   "UseManyToManyEntity": false,
+   "UseNoConstructor": false,
+   "UseNoDefaultConstructor": false,
+   "UseNoNavigations": false,
+   "UseNoObjectFilter": false,
+   "UseNodaTime": false,
+   "UseNullableReferences": true,
+   "UseSchemaFolders": false,
+   "UseSpatial": false
+}
