@@ -21,6 +21,12 @@ namespace GMG.TimeReporting.Core.TimeReportingData
         public virtual DbSet<CommonTask> CommonTasks { get; set; } = null!;
         public virtual DbSet<TimeEntry> TimeEntries { get; set; } = null!;
 
+        protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
+        {
+            configurationBuilder.Properties<DateTime>()
+                .HaveConversion<UnspecifiedKindConverter>();
+        }
+
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             modelBuilder.Entity<CommonTask>(entity =>
@@ -29,12 +35,11 @@ namespace GMG.TimeReporting.Core.TimeReportingData
 
                 entity.HasKey(e => e.CommonTaskId);
 
-                entity.Property(e => e.CommonTaskId).UseIdentityColumn();
+                entity.Property(e => e.CommonTaskId).UseIdentityByDefaultColumn();
 
                 entity.Property(e => e.Title)
                     .IsRequired()
-                    .HasMaxLength(100)
-                    .IsUnicode(false);
+                    .HasMaxLength(100);
             });
 
             modelBuilder.Entity<TimeEntry>(entity =>
@@ -42,19 +47,17 @@ namespace GMG.TimeReporting.Core.TimeReportingData
                 entity.ToTable("TimeEntries");
 
                 entity.HasKey(e => e.TimeEntryId)
-                    .HasName("PK_TimeEntries")
-                    .IsClustered();
+                    .HasName("PK_TimeEntries");
 
-                entity.Property(e => e.TimeEntryId).UseIdentityColumn();
+                entity.Property(e => e.TimeEntryId).UseIdentityByDefaultColumn();
 
                 entity.Property(e => e.Title)
                     .IsRequired()
-                    .HasMaxLength(100)
-                    .IsUnicode(false);
+                    .HasMaxLength(100);
 
-                entity.Property(e => e.StartTime).HasColumnType("datetime");
+                entity.Property(e => e.StartTime).HasColumnType("timestamp without time zone");
 
-                entity.Property(e => e.EndTime).HasColumnType("datetime");
+                entity.Property(e => e.EndTime).HasColumnType("timestamp without time zone");
 
                 // The daily timesheet and schedule queries both filter and sort on StartTime.
                 entity.HasIndex(e => e.StartTime);

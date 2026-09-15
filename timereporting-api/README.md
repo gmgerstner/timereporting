@@ -12,10 +12,20 @@ The solution targets **.NET 10** and contains three projects, all `net10.0`:
 | `GMG.TimeReporting.WebApi`   | The HTTP API                                          |
 | `GMG.TimeReporting.UnitTests`| Tests                                                 |
 
-The database schema is **code-first**: it lives in `GMG.TimeReporting.Core/Migrations` and is applied
-with `dotnet ef`. The old `GMG.TimeReporting.Database` SSDT project, the `GMG.TimeReporting.WinUI`
-WinForms client and its `GMG.TimeReporting.Library` data library have been removed; their history is
-still in git.
+The database is **PostgreSQL**, reached through the `Npgsql.EntityFrameworkCore.PostgreSQL`
+provider. The schema is **code-first**: it lives in `GMG.TimeReporting.Core/Migrations` and is
+applied with `dotnet ef`. The old `GMG.TimeReporting.Database` SSDT project, the
+`GMG.TimeReporting.WinUI` WinForms client and its `GMG.TimeReporting.Library` data library have been
+removed; their history is still in git, as is the SQL Server version of the schema.
+
+Entity and column names keep their PascalCase spelling, so EF quotes them. Hand-written `psql`
+queries have to quote them too: `SELECT * FROM "TimeEntries";`, not `SELECT * FROM TimeEntries;`.
+
+Times are stored as `timestamp without time zone` and are naive local times, the same way SQL
+Server's `datetime` held them: the UI posts date-times with no zone designator and the API compares
+them against `DateTime.Today`. `UnspecifiedKindConverter` strips the `DateTimeKind` off every value
+on its way to the database, because Npgsql — unlike SQL Server — refuses to write a UTC-kind value
+to a `timestamp without time zone` column.
 
 The two stored procedures that lived in the SSDT project were ported to C# in
 `GMG.TimeReporting.Core/TimeReportingData/TimeReportingContext.Queries.cs`, so the database no longer
@@ -33,6 +43,7 @@ open and contributes no hours, and `SUM` skips nulls unless every value is null.
 ## Requirements
 
 - .NET 10 SDK to build.
+- PostgreSQL 14 or later to run against.
 - To install, you will need a Windows Server running IIS with the
   [ASP.NET Core 10 Hosting Bundle](https://dotnet.microsoft.com/download/dotnet/10.0).
 
@@ -65,7 +76,8 @@ dotnet test GMG.TimeReporting.UnitTests
 ```
 
 The database-backed test is skipped unless the `TIMEREPORTING_TEST_CONNECTION` environment
-variable points at a Time Reporting database.
+variable holds an Npgsql connection string for a Time Reporting database, for example
+`Host=localhost;Database=timereporting;Username=postgres;Password=...`.
 
 
 ## Installation
@@ -82,53 +94,55 @@ The schema is managed by EF Core migrations. Restore the local tools once per cl
 dotnet tool restore
 ```
 
-**For a new, empty database** — create a database called `TimeReporting`, point
-`ConnectionStrings:DefaultConnection` at it, then:
-
-```cmd
-dotnet ef database update --project GMG.TimeReporting.Core --startup-project GMG.TimeReporting.WebApi
-```
-
-**For the existing production database**, which already has the tables, do *not* run the initial
-migration against it — baseline it instead. `InitialCreate` reproduces the legacy schema exactly, so
-mark it as already applied and then apply only what follows:
+Create the role and the database, then point `ConnectionStrings:DefaultConnection` at it:
 
 ```sql
-IF OBJECT_ID(N'[__EFMigrationsHistory]') IS NULL
-BEGIN
-    CREATE TABLE [__EFMigrationsHistory] (
-        [MigrationId] nvarchar(150) NOT NULL,
-        [ProductVersion] nvarchar(32) NOT NULL,
-        CONSTRAINT [PK___EFMigrationsHistory] PRIMARY KEY ([MigrationId])
-    );
-END;
-
-INSERT INTO [__EFMigrationsHistory] ([MigrationId], [ProductVersion])
-VALUES (N'20260915035112_InitialCreate', N'10.0.12');
+CREATE ROLE timereporting LOGIN PASSWORD '<a strong password>';
+CREATE DATABASE timereporting OWNER timereporting;
 ```
 
 ```cmd
-dotnet ef database update --project GMG.TimeReporting.Core --startup-project GMG.TimeReporting.WebApi
+dotnet ef database update --project GMG.TimeReporting.Core --startup-project GMG.TimeReporting.WebApi --context TimeReportingContext
 ```
 
-That applies `AddTimeEntryStartTimeIndex`, the one schema change on top of the legacy definition.
+`--context` is not optional: the API registers two contexts, and only `TimeReportingContext` has
+migrations.
+
+`InitialCreate` is the whole schema: `CommonTasks`, `TimeEntries` and the `StartTime` index. It
+targets PostgreSQL only — the SQL Server migrations it replaced are in git history, and there is no
+path that upgrades a SQL Server database in place. Moving an existing SQL Server instance means
+exporting its `CommonTasks` and `TimeEntries` rows and loading them into the new database
+separately.
 
 To generate a script instead of connecting (for a DBA to review and run):
 
 ```cmd
-dotnet ef migrations script --idempotent --project GMG.TimeReporting.Core --startup-project GMG.TimeReporting.WebApi --output deploy.sql
+dotnet ef migrations script --idempotent --project GMG.TimeReporting.Core --startup-project GMG.TimeReporting.WebApi --context TimeReportingContext --output deploy.sql
 ```
 
 To change the schema, edit the entities and `OnModelCreating`, then:
 
 ```cmd
-dotnet ef migrations add <Name> --project GMG.TimeReporting.Core --startup-project GMG.TimeReporting.WebApi
+dotnet ef migrations add <Name> --project GMG.TimeReporting.Core --startup-project GMG.TimeReporting.WebApi --context TimeReportingContext
 ```
+
+#### Password archive database
+
+Logins are checked against a second database, `passwordarchive`, which belongs to the separate
+security application; EF Core migrations do not own it. `sql/passwordarchive.sql` creates the tables
+this API expects, so a fresh PostgreSQL instance can be brought up with:
+
+```cmd
+psql -c "CREATE DATABASE passwordarchive OWNER timereporting"
+psql -d passwordarchive -f sql/passwordarchive.sql
+```
+
+Then point `ConnectionStrings:PasswordArchiveConnection` at it.
 
 Remaining setup:
 
-- Give the Application Pool permission to read and write to the database. The old EXECUTE grant on
-  the stored procedures is no longer needed — there are none.
+- Give the API's PostgreSQL role permission to read and write to the database. The old EXECUTE grant
+  on the stored procedures is no longer needed — there are none.
 - Add the necessary entry to the security application for logging in (steps not included here).
 - Populate a few common tasks in the CommonTasks table. The titles the retired `GetRecentTasks`
   procedure treated as favourites were: Team meeting, Admin, Daily Scrum, Qualtrax.

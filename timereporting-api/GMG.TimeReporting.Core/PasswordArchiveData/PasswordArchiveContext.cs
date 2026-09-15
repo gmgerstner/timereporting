@@ -18,6 +18,12 @@ namespace GMG.TimeReporting.Core.PasswordArchiveData
         public virtual DbSet<Password> Passwords { get; set; } = null!;
         public virtual DbSet<SystemUser> SystemUsers { get; set; } = null!;
 
+        protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
+        {
+            configurationBuilder.Properties<DateTime>()
+                .HaveConversion<UnspecifiedKindConverter>();
+        }
+
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             modelBuilder.Entity<Category>(entity =>
@@ -28,8 +34,7 @@ namespace GMG.TimeReporting.Core.PasswordArchiveData
 
                 entity.Property(e => e.CategoryName)
                     .IsRequired()
-                    .HasMaxLength(50)
-                    .IsUnicode(false);
+                    .HasMaxLength(50);
             });
 
             modelBuilder.Entity<PasswordCategory>(entity =>
@@ -59,33 +64,29 @@ namespace GMG.TimeReporting.Core.PasswordArchiveData
 
                 entity.HasKey(e => e.PasswordId);
 
-                entity.Property(e => e.CreatedDate).HasColumnType("datetime");
+                entity.Property(e => e.CreatedDate).HasColumnType("timestamp without time zone");
 
-                entity.Property(e => e.ExpirationDate).HasColumnType("datetime");
+                entity.Property(e => e.ExpirationDate).HasColumnType("timestamp without time zone");
 
-                entity.Property(e => e.LastModifiedDate).HasColumnType("datetime");
+                entity.Property(e => e.LastModifiedDate).HasColumnType("timestamp without time zone");
 
                 entity.Property(e => e.Notes).HasColumnType("text");
 
                 entity.Property(e => e.PasswordValue)
                     .HasColumnName("Password")
                     .IsRequired()
-                    .HasMaxLength(50)
-                    .IsUnicode(false);
+                    .HasMaxLength(50);
 
                 entity.Property(e => e.Title)
                     .IsRequired()
-                    .HasMaxLength(50)
-                    .IsUnicode(false);
+                    .HasMaxLength(50);
 
                 entity.Property(e => e.Url)
                     .HasColumnName("URL")
-                    .HasMaxLength(50)
-                    .IsUnicode(false);
+                    .HasMaxLength(50);
 
                 entity.Property(e => e.Username)
-                    .HasMaxLength(50)
-                    .IsUnicode(false);
+                    .HasMaxLength(50);
 
                 entity.HasOne(d => d.SystemUser)
                     .WithMany(p => p.Passwords)
@@ -102,23 +103,19 @@ namespace GMG.TimeReporting.Core.PasswordArchiveData
                 entity.HasKey(e => e.SystemUserId);
 
                 entity.Property(e => e.DefaultUsername)
-                    .HasMaxLength(50)
-                    .IsUnicode(false);
+                    .HasMaxLength(50);
 
                 entity.Property(e => e.SystemPasswordHint)
-                    .HasMaxLength(50)
-                    .IsUnicode(false);
+                    .HasMaxLength(50);
 
                 entity.Property(e => e.HashedSystemPassword)
                     .IsRequired()
                     .HasMaxLength(64)
-                    .IsUnicode(false)
                     .IsFixedLength();
 
                 entity.Property(e => e.SystemUsername)
                     .IsRequired()
-                    .HasMaxLength(50)
-                    .IsUnicode(false);
+                    .HasMaxLength(50);
             });
 
             OnModelCreatingPartial(modelBuilder);

@@ -26,9 +26,9 @@ builder.Services.AddCors(options =>
 });
 
 builder.Services.AddDbContext<TimeReportingContext>(options =>
-    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+    options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
 builder.Services.AddDbContext<PasswordArchiveContext>(options =>
-    options.UseSqlServer(builder.Configuration.GetConnectionString("PasswordArchiveConnection")));
+    options.UseNpgsql(builder.Configuration.GetConnectionString("PasswordArchiveConnection")));
 
 builder.Services
     .AddAuthentication(options =>

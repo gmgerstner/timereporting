@@ -21,7 +21,7 @@ namespace GMG.TimeReporting.UnitTests
             }
 
             var options = new DbContextOptionsBuilder<TimeReportingContext>()
-                .UseSqlServer(connectionString)
+                .UseNpgsql(connectionString)
                 .Options;
             context = new TimeReportingContext(options);
         }
