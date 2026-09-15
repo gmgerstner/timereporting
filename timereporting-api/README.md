@@ -14,7 +14,8 @@ The solution targets **.NET 10** and contains three projects, all `net10.0`:
 
 The database is **PostgreSQL**, reached through the `Npgsql.EntityFrameworkCore.PostgreSQL`
 provider. The schema is **code-first**: it lives in `GMG.TimeReporting.Core/Migrations` and is
-applied with `dotnet ef`. The old `GMG.TimeReporting.Database` SSDT project, the
+applied at startup, or by hand with `dotnet ef`. Point the API at an empty PostgreSQL server and it
+creates both databases for itself — see [Database](#database). The old `GMG.TimeReporting.Database` SSDT project, the
 `GMG.TimeReporting.WinUI` WinForms client and its `GMG.TimeReporting.Library` data library have been
 removed; their history is still in git, as is the SQL Server version of the schema.
 
@@ -88,17 +89,39 @@ variable holds an Npgsql connection string for a Time Reporting database, for ex
 
 ### Database
 
-The schema is managed by EF Core migrations. Restore the local tools once per clone:
+**The API provisions its own databases on startup.** All that has to exist beforehand is a
+PostgreSQL server and a login role that may create databases:
+
+```sql
+CREATE ROLE timereporting LOGIN CREATEDB PASSWORD '<a strong password>';
+```
+
+Point the two connection strings at that role and start the API. `ProvisionDatabasesAsync` in
+`Program.cs` then:
+
+- creates the `timereporting` database if the server does not have it, and applies every outstanding
+  migration — so a first run builds the schema and a later deploy picks up new migrations;
+- creates the `passwordarchive` database from the model if it is missing (see
+  [Password archive database](#password-archive-database)).
+
+Both steps are no-ops once everything is in place, so restarts cost a couple of round trips and log
+nothing. The `CREATEDB` privilege is only needed for the run that creates the databases; you can
+revoke it afterwards with `ALTER ROLE timereporting NOCREATEDB` and the API will keep working.
+Without it, a first run fails fast with `42501: permission denied to create database`.
+
+`InitialCreate` is the whole Time Reporting schema: `CommonTasks`, `TimeEntries` and the `StartTime`
+index. It targets PostgreSQL only — the SQL Server migrations it replaced are in git history, and
+there is no path that upgrades a SQL Server database in place. Moving an existing SQL Server
+instance means exporting its `CommonTasks` and `TimeEntries` rows and loading them into the new
+database separately.
+
+#### Applying migrations by hand
+
+If you would rather control when the schema changes, the same migrations apply from the command
+line. Restore the local tools once per clone:
 
 ```cmd
 dotnet tool restore
-```
-
-Create the role and the database, then point `ConnectionStrings:DefaultConnection` at it:
-
-```sql
-CREATE ROLE timereporting LOGIN PASSWORD '<a strong password>';
-CREATE DATABASE timereporting OWNER timereporting;
 ```
 
 ```cmd
@@ -107,12 +130,6 @@ dotnet ef database update --project GMG.TimeReporting.Core --startup-project GMG
 
 `--context` is not optional: the API registers two contexts, and only `TimeReportingContext` has
 migrations.
-
-`InitialCreate` is the whole schema: `CommonTasks`, `TimeEntries` and the `StartTime` index. It
-targets PostgreSQL only — the SQL Server migrations it replaced are in git history, and there is no
-path that upgrades a SQL Server database in place. Moving an existing SQL Server instance means
-exporting its `CommonTasks` and `TimeEntries` rows and loading them into the new database
-separately.
 
 To generate a script instead of connecting (for a DBA to review and run):
 
@@ -129,20 +146,17 @@ dotnet ef migrations add <Name> --project GMG.TimeReporting.Core --startup-proje
 #### Password archive database
 
 Logins are checked against a second database, `passwordarchive`, which belongs to the separate
-security application; EF Core migrations do not own it. `sql/passwordarchive.sql` creates the tables
-this API expects, so a fresh PostgreSQL instance can be brought up with:
-
-```cmd
-psql -c "CREATE DATABASE passwordarchive OWNER timereporting"
-psql -d passwordarchive -f sql/passwordarchive.sql
-```
-
-Then point `ConnectionStrings:PasswordArchiveConnection` at it.
+security application. EF Core migrations do not own it, so startup uses `EnsureCreated` rather than
+`Migrate`: it builds the database from `PasswordArchiveContext` when the database is missing and
+does nothing at all when it already exists. That means it will not fight the security application
+over a database that app created, but it also means that if this API gets there first, the archive
+is created with only the tables and columns this API models. Where the security application owns
+the archive, let it create the database before the API's first run.
 
 Remaining setup:
 
-- Give the API's PostgreSQL role permission to read and write to the database. The old EXECUTE grant
-  on the stored procedures is no longer needed — there are none.
+- The API's PostgreSQL role owns the databases it creates, so it already has read and write access.
+  The old EXECUTE grant on the stored procedures is no longer needed — there are none.
 - Add the necessary entry to the security application for logging in (steps not included here).
 - Populate a few common tasks in the CommonTasks table. The titles the retired `GetRecentTasks`
   procedure treated as favourites were: Team meeting, Admin, Daily Scrum, Qualtrax.

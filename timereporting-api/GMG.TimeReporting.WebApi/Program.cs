@@ -74,6 +74,8 @@ builder.Services.AddSwaggerGen(c =>
 
 var app = builder.Build();
 
+await ProvisionDatabasesAsync(app);
+
 if (app.Environment.IsDevelopment())
 {
     app.UseDeveloperExceptionPage();
@@ -97,3 +99,41 @@ app.UseAuthorization();
 app.MapControllers();
 
 app.Run();
+
+/// <summary>
+/// Creates both databases at startup if the PostgreSQL server does not have them yet,
+/// and brings the Time Reporting schema up to the latest migration.
+/// </summary>
+/// <remarks>
+/// The login role needs the CREATEDB privilege the first time this runs; afterwards it
+/// only needs access to the two databases. Both calls are no-ops once everything is in
+/// place, so a normal restart costs a couple of round trips.
+/// </remarks>
+static async Task ProvisionDatabasesAsync(WebApplication app)
+{
+    using var scope = app.Services.CreateScope();
+    var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+
+    var timeReporting = scope.ServiceProvider.GetRequiredService<TimeReportingContext>();
+    var pending = await timeReporting.Database.GetPendingMigrationsAsync();
+    if (pending.Any())
+    {
+        logger.LogInformation(
+            "Applying {Count} Time Reporting migration(s): {Migrations}.",
+            pending.Count(),
+            string.Join(", ", pending));
+    }
+
+    // Creates the database first if it is missing, then applies whatever is outstanding.
+    await timeReporting.Database.MigrateAsync();
+
+    // The password archive has no migrations of its own — the schema belongs to the
+    // separate security application. EnsureCreated builds it from the model when the
+    // database is missing and does nothing whatsoever when it already exists, so it
+    // will not fight with the security application over a database that app created.
+    var passwordArchive = scope.ServiceProvider.GetRequiredService<PasswordArchiveContext>();
+    if (await passwordArchive.Database.EnsureCreatedAsync())
+    {
+        logger.LogInformation("Created the password archive database from the model.");
+    }
+}
