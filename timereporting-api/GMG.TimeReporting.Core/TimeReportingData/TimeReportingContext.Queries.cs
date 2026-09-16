@@ -23,14 +23,20 @@ namespace GMG.TimeReporting.Core.TimeReportingData
         ];
 
         /// <summary>
-        /// Hours booked per task title for a single work day.
+        /// Hours booked per task title for a single work day, for one user.
         /// </summary>
         /// <remarks>
         /// Port of dbo.GetDailyTimesheet. An entry that has no EndTime is treated as ending
         /// when the next entry of the same day starts; the last entry of the day, if it is
         /// still running, contributes no hours (the original returned NULL for it).
+        /// <para>
+        /// The original procedure predates multiple users and summed across the whole table.
+        /// Chaining an open entry onto the next one only makes sense within a single person's
+        /// day, so the filter is applied before the entries are paired up.
+        /// </para>
         /// </remarks>
         public async Task<IReadOnlyList<TimeSheetEntry>> GetDailyTimesheetAsync(
+            int userId,
             DateTime? date,
             CancellationToken cancellationToken = default)
         {
@@ -42,6 +48,7 @@ namespace GMG.TimeReporting.Core.TimeReportingData
 
             var entries = await TimeEntries
                 .AsNoTracking()
+                .Where(te => te.UserId == userId)
                 .Where(te => te.StartTime >= workDate && te.StartTime <= dayAfter)
                 .OrderBy(te => te.StartTime)
                 .ThenBy(te => te.TimeEntryId)
@@ -95,10 +102,12 @@ namespace GMG.TimeReporting.Core.TimeReportingData
         /// from the CommonTasks table and applies a 21-day cut-off instead. This method is
         /// retained so the original procedure's behaviour is not lost.
         /// </remarks>
+        /// <param name="userId">The user whose entries to look at.</param>
         /// <param name="favorites">
         /// Titles to pin to the top. Defaults to <see cref="LegacyFavoriteTitles"/>.
         /// </param>
         public async Task<IReadOnlyList<RecentTask>> GetRecentTasksAsync(
+            int userId,
             IEnumerable<string>? favorites = null,
             CancellationToken cancellationToken = default)
         {
@@ -108,6 +117,7 @@ namespace GMG.TimeReporting.Core.TimeReportingData
 
             var grouped = await TimeEntries
                 .AsNoTracking()
+                .Where(te => te.UserId == userId)
                 .GroupBy(te => te.Title)
                 .Select(g => new RecentTask
                 {

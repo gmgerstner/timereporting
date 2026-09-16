@@ -5,9 +5,18 @@ export interface LoginCredentials {
 
 export interface User {
   username: string;
+  /** True when this user may view other users' schedules and timesheets. */
+  isAdmin: boolean;
   /** Local ISO date-time string, as returned by the API. */
   expires: string;
   token: string;
+}
+
+/** One entry in the admin's user picker. */
+export interface UserSummary {
+  userId: number;
+  username: string;
+  isAdmin: boolean;
 }
 
 export interface TimeEntry {

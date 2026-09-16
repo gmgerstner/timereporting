@@ -18,6 +18,29 @@ namespace GMG.TimeReporting.Core.PasswordArchiveData
         public virtual DbSet<Password> Passwords { get; set; } = null!;
         public virtual DbSet<SystemUser> SystemUsers { get; set; } = null!;
 
+        protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+        {
+            // Nothing read out of the archive is ever edited, so there is no reason to pay
+            // for change tracking — and no tracked entity for a stray SaveChanges to write.
+            optionsBuilder.UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking);
+        }
+
+        /// <inheritdoc />
+        /// <exception cref="InvalidOperationException">Always.</exception>
+        public override int SaveChanges(bool acceptAllChangesOnSuccess) =>
+            throw ReadOnly();
+
+        /// <inheritdoc />
+        /// <exception cref="InvalidOperationException">Always.</exception>
+        public override Task<int> SaveChangesAsync(
+            bool acceptAllChangesOnSuccess,
+            CancellationToken cancellationToken = default) =>
+            throw ReadOnly();
+
+        private static InvalidOperationException ReadOnly() =>
+            new("The PasswordArchive database belongs to the security application; this app "
+                + "only reads from it and never writes to it.");
+
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             modelBuilder.Entity<Category>(entity =>

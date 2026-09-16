@@ -1,5 +1,5 @@
 import { config } from '../config';
-import type { LoginCredentials, TimeEntry, TimeSheetEntry, User } from '../models';
+import type { LoginCredentials, TimeEntry, TimeSheetEntry, User, UserSummary } from '../models';
 import { toLocalISODateTimeString } from '../utils/time';
 import { getToken } from './storage';
 
@@ -71,14 +71,22 @@ export const api = {
     return request<string[]>('/TimeEntries/GetRecentTitles');
   },
 
-  getSchedule(): Promise<TimeEntry[]> {
-    return request<TimeEntry[]>('/TimeEntries/GetSchedule');
+  /** Admins may pass another user's id; everyone else gets their own entries. */
+  getSchedule(userId?: number | null): Promise<TimeEntry[]> {
+    return request<TimeEntry[]>('/TimeEntries/GetSchedule', {
+      query: { UserId: userId },
+    });
   },
 
-  getDailyTimeSheet(workDate: string | null): Promise<TimeSheetEntry[]> {
+  getDailyTimeSheet(workDate: string | null, userId?: number | null): Promise<TimeSheetEntry[]> {
     return request<TimeSheetEntry[]>('/TimeEntries/GetDailyTimeSheet', {
-      query: { WorkDate: workDate },
+      query: { WorkDate: workDate, UserId: userId },
     });
+  },
+
+  /** Admin-only: everyone who has logged in at least once. */
+  getUsers(): Promise<UserSummary[]> {
+    return request<UserSummary[]>('/Users/GetUsers');
   },
 
   getTimeEntry(id: number): Promise<TimeEntry> {

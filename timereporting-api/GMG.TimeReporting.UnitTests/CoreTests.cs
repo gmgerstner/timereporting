@@ -32,11 +32,19 @@ namespace GMG.TimeReporting.UnitTests
             context?.Dispose();
         }
 
+        /// <summary>
+        /// Smoke test that the mapped model still matches the database it is pointed at.
+        /// </summary>
+        /// <remarks>
+        /// This used to assert the table was non-empty, which only held when the database
+        /// happened to already have rows in it — and, now that entries belong to a user, a
+        /// count across everyone says nothing useful. Running the query is the part that
+        /// catches a column that the model and the schema disagree about.
+        /// </remarks>
         [Test]
-        public void LastFewTimeEntries()
+        public void TimeEntriesQuery_MatchesTheSchema()
         {
-            var count = context.TimeEntries.Count();
-            Assert.That(count, Is.GreaterThan(0));
+            Assert.That(() => context.TimeEntries.OrderBy(te => te.StartTime).Take(5).ToList(), Throws.Nothing);
         }
     }
 

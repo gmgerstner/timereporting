@@ -1,5 +1,6 @@
 using GMG.TimeReporting.Core.PasswordArchiveData;
 using GMG.TimeReporting.Core.TimeReportingData;
+using GMG.TimeReporting.WebApi.Controllers;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -40,12 +41,22 @@ builder.Services
     {
         options.RequireHttpsMetadata = false;
         options.SaveToken = true;
+
+        // Off by default this would be true, which renames inbound "role" and "sub" to the
+        // long WS-Federation claim types. The RoleClaimType below would then be looking for
+        // a claim name that no longer exists, and every [Authorize(Roles = ...)] check would
+        // quietly 403 despite a token that plainly carries the role. Keeping the claims under
+        // the names the token actually uses is what makes the two agree.
+        options.MapInboundClaims = false;
+
         options.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuerSigningKey = true,
             IssuerSigningKey = signingKey,
             ValidateIssuer = false,
-            ValidateAudience = false
+            ValidateAudience = false,
+            NameClaimType = "username",
+            RoleClaimType = "role"
         };
     });
 builder.Services.AddAuthorization();
@@ -107,9 +118,9 @@ app.Run();
 /// <remarks>
 /// Only the Time Reporting database is provisioned here. The password archive is a SQL
 /// Server database owned by the separate security application, which is the only thing that
-/// may create it or change its shape; this API reads and writes its rows and nothing more.
-/// Do not add an EnsureCreated or Migrate call for <see cref="PasswordArchiveContext"/> —
-/// either one would let this API define a schema that is not its to define.
+/// may create it or change its shape; this API only ever reads from it. Do not add an
+/// EnsureCreated or Migrate call for <see cref="PasswordArchiveContext"/> — either one would
+/// let this API define a schema that is not its to define.
 ///
 /// The PostgreSQL login role needs the CREATEDB privilege the first time this runs;
 /// afterwards it only needs access to the database it created. The call is a no-op once the
@@ -132,4 +143,17 @@ static async Task MigrateTimeReportingDatabaseAsync(WebApplication app)
 
     // Creates the database first if it is missing, then applies whatever is outstanding.
     await timeReporting.Database.MigrateAsync();
+
+    // The password archive belongs to the security application. This app only reads it, so it
+    // is never created, migrated or written to — it is simply expected to be there. Checking
+    // now turns a misconfigured connection string into a startup warning instead of a puzzling
+    // failure at someone's first login attempt.
+    var passwordArchive = scope.ServiceProvider.GetRequiredService<PasswordArchiveContext>();
+    if (!await passwordArchive.Database.CanConnectAsync())
+    {
+        logger.LogWarning(
+            "Cannot reach the password archive database. Logins will fail until "
+            + "ConnectionStrings:PasswordArchiveConnection points at the security "
+            + "application's database. This app never creates it.");
+    }
 }

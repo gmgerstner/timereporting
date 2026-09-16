@@ -7,6 +7,7 @@ export const StorageKeys = {
   password: 'Password',
   token: 'Token',
   expires: 'Expires',
+  isAdmin: 'IsAdmin',
 } as const;
 
 export function getToken(): string {
@@ -17,15 +18,21 @@ export function getStoredUsername(): string {
   return localStorage.getItem(StorageKeys.username) ?? '';
 }
 
+export function isStoredAdmin(): boolean {
+  return localStorage.getItem(StorageKeys.isAdmin) === 'true';
+}
+
 export function setCredentials(user: User): void {
   localStorage.setItem(StorageKeys.username, user.username);
   localStorage.setItem(StorageKeys.token, user.token);
   localStorage.setItem(StorageKeys.expires, user.expires);
+  localStorage.setItem(StorageKeys.isAdmin, String(user.isAdmin));
 }
 
 export function clearCredentials(): void {
   localStorage.setItem(StorageKeys.token, '');
   localStorage.setItem(StorageKeys.expires, '');
+  localStorage.setItem(StorageKeys.isAdmin, 'false');
 }
 
 /** True when a token is stored and has not expired yet. */
