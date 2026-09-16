@@ -1,0 +1,22 @@
+<Project>
+
+  <!--
+    Where a deployment goes.
+
+    Everything lives under one site root: the UI at the root itself, and the API in the
+    "api" folder beneath it, which is the physical path of the /api sub-application in
+    IIS. Nothing is deployed outside this root.
+
+    These are the defaults for `deploy.proj` and for the API's FolderProfile publish
+    profile, so both halves of the solution stay in step. Override on the command line to
+    deploy somewhere else:
+
+        dotnet msbuild deploy.proj -p:SiteRoot=\\DARMIK\Web\staging\timereporting
+  -->
+  <PropertyGroup>
+    <SiteRoot Condition="'$(SiteRoot)' == ''">\\DARMIK\Web\gmgdesk.com\timereporting</SiteRoot>
+    <UiDeployDir Condition="'$(UiDeployDir)' == ''">$(SiteRoot)</UiDeployDir>
+    <ApiDeployDir Condition="'$(ApiDeployDir)' == ''">$(SiteRoot)\api</ApiDeployDir>
+  </PropertyGroup>
+
+</Project>

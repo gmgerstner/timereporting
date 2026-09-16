@@ -248,12 +248,25 @@ Remaining setup:
 
 ### API Code
 
-- Create a folder for the API code. Recommended: Call it something similar to the UI's folder with _api appended.
+The API is an IIS sub-application of the UI's site, living in an `api` folder inside the UI's
+own directory. One-time setup:
+
 - In IIS, right-click the site for the UI and select Add Application.
 - Enter the following:
-  - Alias: api
-  - Physical path to where the .NET code will be installed.
-- Update path in the file: timereporting-api\GMG.TimeReporting.WebApi\Properties\PublishProfiles\FolderProfile.pubxml
-- Deploy the built code to the api folder.
-	- Right-click the GMG.TimeReporting.WebApi project and select Publish
-	- Click the Publish button
+  - Alias: `api`
+  - Physical path: the `api` folder inside the UI's physical path — `ApiDeployDir` in the
+    repository's `Directory.Build.props`, by default
+    `\\DARMIK\Web\gmgdesk.com\timereporting\api`. Create the folder if it does not exist yet.
+- Set the application pool's environment variables for the connection strings and the JWT
+  signing key (see [Configuration](#configuration)).
+
+To deploy, run this from the repository root — it publishes the API *and* the UI:
+
+```cmd
+dotnet msbuild deploy.proj
+```
+
+To deploy only the API, right-click the GMG.TimeReporting.WebApi project in Visual Studio,
+select Publish, and publish with the `FolderProfile` profile. It writes to the same
+`ApiDeployDir`, so the two routes cannot disagree. Change the destination in
+`Directory.Build.props`, never in the `.pubxml`.

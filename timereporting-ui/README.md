@@ -59,7 +59,7 @@ Other scripts:
 | `npm run build`   | Type-check and produce a production build            |
 | `npm run preview` | Serve the production build locally                   |
 | `npm run lint`    | Run ESLint                                           |
-| `npm run copy`    | Copy `dist/TimeReporting` to the server share        |
+| `npm run copy`    | Copy `dist/TimeReporting` to the deploy folder       |
 | `npm run deploy`  | Build, then copy                                     |
 
 ## Project layout
@@ -77,9 +77,24 @@ src/
 
 ## Deploying to Server
 
+To deploy the UI and the API together, run this from the repository root:
+
+```cmd
+dotnet msbuild deploy.proj
+```
+
+To deploy only the UI:
+
 ```cmd
 npm run deploy
 ```
+
+Both copy to the same folder. `npm run copy` targets the path hard-coded in `package.json`;
+`deploy.proj` uses `UiDeployDir` from the repository's `Directory.Build.props`. Keep the two
+in step if you change where the site lives.
+
+Neither deletes anything at the destination, and both skip the `api` subfolder, so deploying
+the UI never disturbs the API installed beneath it.
 
 ## Initial Installation on Server
 
@@ -91,8 +106,8 @@ npm run deploy
   - Binding and Host name information as desired
 - Make sure the Application Pool's .NET CLR Version is set to No Managed Code
 - Install the URL Rewrite module for IIS, which `public/web.config` depends on for SPA routing.
-- Open the package.json file and update the folder paths for copy and deploy to the physical path
-  for the UI code.
+- Open `package.json` and point the `copy` script at the physical path for the UI code, and
+  `Directory.Build.props` in the repository root at the same path (`SiteRoot`).
 - Open `.env.production` and adjust `VITE_API_URL` to point to the correct api path.
 - In a command prompt (or powershell) run:
   ```

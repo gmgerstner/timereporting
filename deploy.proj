@@ -1,0 +1,82 @@
+<Project DefaultTargets="Deploy">
+
+  <!--
+    This project has no Sdk attribute, so it never imports Microsoft.Common.props and would
+    not pick up Directory.Build.props on its own. Import it explicitly for the deployment
+    destinations, which the API's publish profile reads from the same file.
+  -->
+  <Import Project="Directory.Build.props" />
+
+  <!--
+    Deploys the whole solution in one call:
+
+        dotnet msbuild deploy.proj
+
+    The UI is built with Vite and copied to $(UiDeployDir); the API is published with its
+    FolderProfile to $(ApiDeployDir). Both destinations are defined in
+    Directory.Build.props and can be overridden on the command line:
+
+        dotnet msbuild deploy.proj -p:SiteRoot=\\DARMIK\Web\staging\timereporting
+
+    The UI goes first. The API lives in a folder beneath the UI's root, so publishing it
+    second means a half-finished UI copy can never land on top of a fresh API.
+  -->
+
+  <PropertyGroup>
+    <Configuration Condition="'$(Configuration)' == ''">Release</Configuration>
+    <ApiProject>timereporting-api\GMG.TimeReporting.WebApi\GMG.TimeReporting.WebApi.csproj</ApiProject>
+    <UiDirectory>timereporting-ui</UiDirectory>
+    <!-- Matches build.outDir in vite.config.ts and BuildOutputFolder in the esproj. -->
+    <UiBuildOutput>$(UiDirectory)\dist\TimeReporting</UiBuildOutput>
+  </PropertyGroup>
+
+  <Target Name="Deploy" DependsOnTargets="PublishUi;PublishApi">
+    <Message Importance="high" Text="Deployed UI to $(UiDeployDir)" />
+    <Message Importance="high" Text="Deployed API to $(ApiDeployDir)" />
+  </Target>
+
+  <!-- Only on a clone that has never installed; `npm ci` on every deploy would be slow. -->
+  <Target Name="RestoreUi" Condition="!Exists('$(UiDirectory)\node_modules')">
+    <Message Importance="high" Text="Installing UI dependencies..." />
+    <Exec Command="npm ci" WorkingDirectory="$(UiDirectory)" />
+  </Target>
+
+  <Target Name="BuildUi" DependsOnTargets="RestoreUi">
+    <Message Importance="high" Text="Building UI ($(Configuration))..." />
+    <!-- `npm run build` is `tsc -b && vite build`, so a type error fails the deploy here. -->
+    <Exec Command="npm run build" WorkingDirectory="$(UiDirectory)" />
+    <Error Condition="!Exists('$(UiBuildOutput)\index.html')"
+           Text="UI build produced no index.html in $(UiBuildOutput)." />
+  </Target>
+
+  <Target Name="PublishUi" DependsOnTargets="BuildUi">
+    <Message Importance="high" Text="Copying UI to $(UiDeployDir)..." />
+    <MakeDir Directories="$(UiDeployDir)" />
+    <!--
+      /E copies subdirectories. Deliberately no /MIR or /PURGE: the API lives in a folder
+      underneath this one, and mirroring would delete it. /XD guards it regardless.
+    -->
+    <Exec Command="robocopy &quot;$(UiBuildOutput)&quot; &quot;$(UiDeployDir)&quot; /E /R:2 /W:2 /NFL /NDL /NJH /NJS /NP /XD &quot;$(ApiDeployDir)&quot;"
+          IgnoreExitCode="true">
+      <Output TaskParameter="ExitCode" PropertyName="RobocopyExitCode" />
+    </Exec>
+    <!-- robocopy reports 0-7 for varying degrees of success; 8 and above are failures. -->
+    <Error Condition="'$(RobocopyExitCode)' != '' And $(RobocopyExitCode) &gt;= 8"
+           Text="Copying the UI to $(UiDeployDir) failed (robocopy exit code $(RobocopyExitCode))." />
+  </Target>
+
+  <Target Name="PublishApi">
+    <Message Importance="high" Text="Publishing API to $(ApiDeployDir)..." />
+    <!--
+      The MSBuild task rather than `dotnet publish`, so PublishDir's trailing separator is
+      passed as a property value instead of through a command line, where the backslash
+      would escape the closing quote. Passing it explicitly also means a -p:SiteRoot
+      override on this project reaches the API build; the publish profile's own default
+      would not see it.
+    -->
+    <MSBuild Projects="$(ApiProject)"
+             Targets="Publish"
+             Properties="Configuration=$(Configuration);PublishProfile=FolderProfile;PublishDir=$(ApiDeployDir)\" />
+  </Target>
+
+</Project>

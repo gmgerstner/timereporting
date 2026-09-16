@@ -9,7 +9,7 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "lint": "eslint .",
-    "copy": "robocopy .\\dist\\TimeReporting \\DARMIK\\Web\\gmgdesk.com\\timereporting",
+    "copy": "robocopy .\\dist\\TimeReporting \\\\DARMIK\\Web\\gmgdesk.com\\timereporting /E /R:2 /W:2 /XD api & if errorlevel 8 (exit 1) else (exit 0)",
     "deploy": "npm run build && npm run copy"
   },
   "dependencies": {
