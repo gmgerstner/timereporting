@@ -12,21 +12,26 @@ The solution targets **.NET 10** and contains three projects, all `net10.0`:
 | `GMG.TimeReporting.WebApi`   | The HTTP API                                          |
 | `GMG.TimeReporting.UnitTests`| Tests                                                 |
 
-The database is **PostgreSQL**, reached through the `Npgsql.EntityFrameworkCore.PostgreSQL`
-provider. The schema is **code-first**: it lives in `GMG.TimeReporting.Core/Migrations` and is
-applied at startup, or by hand with `dotnet ef`. Point the API at an empty PostgreSQL server and it
-creates both databases for itself — see [Database](#database). The old `GMG.TimeReporting.Database` SSDT project, the
+The API uses two databases on two different engines. **Time Reporting is PostgreSQL**, reached
+through the `Npgsql.EntityFrameworkCore.PostgreSQL` provider; its schema is **code-first**, lives in
+`GMG.TimeReporting.Core/Migrations` and is applied at startup, or by hand with `dotnet ef`. The
+**password archive stays on SQL Server**, reached through `Microsoft.EntityFrameworkCore.SqlServer`:
+it belongs to the separate security application, which owns its schema — so only Time Reporting
+moved to PostgreSQL, and this API never creates or alters the archive. Point the API at the two
+servers and it provisions the Time Reporting database for itself — see [Database](#database). The old `GMG.TimeReporting.Database` SSDT project, the
 `GMG.TimeReporting.WinUI` WinForms client and its `GMG.TimeReporting.Library` data library have been
-removed; their history is still in git, as is the SQL Server version of the schema.
+removed; their history is still in git, as is the SQL Server version of the Time Reporting schema.
 
-Entity and column names keep their PascalCase spelling, so EF quotes them. Hand-written `psql`
-queries have to quote them too: `SELECT * FROM "TimeEntries";`, not `SELECT * FROM TimeEntries;`.
+In the Time Reporting database, entity and column names keep their PascalCase spelling, so EF quotes
+them. Hand-written `psql` queries have to quote them too: `SELECT * FROM "TimeEntries";`, not
+`SELECT * FROM TimeEntries;`.
 
-Times are stored as `timestamp without time zone` and are naive local times, the same way SQL
+Time Reporting stores times as `timestamp without time zone`, naive local times, the same way SQL
 Server's `datetime` held them: the UI posts date-times with no zone designator and the API compares
 them against `DateTime.Today`. `UnspecifiedKindConverter` strips the `DateTimeKind` off every value
-on its way to the database, because Npgsql — unlike SQL Server — refuses to write a UTC-kind value
-to a `timestamp without time zone` column.
+on its way to that database, because Npgsql — unlike SQL Server — refuses to write a UTC-kind value
+to a `timestamp without time zone` column. The password archive keeps its `datetime` columns and
+needs no converter, since SQL Server ignores the `Kind`.
 
 The two stored procedures that lived in the SSDT project were ported to C# in
 `GMG.TimeReporting.Core/TimeReportingData/TimeReportingContext.Queries.cs`, so the database no longer
@@ -44,7 +49,8 @@ open and contributes no hours, and `SUM` skips nulls unless every value is null.
 ## Requirements
 
 - .NET 10 SDK to build.
-- PostgreSQL 14 or later to run against.
+- PostgreSQL 14 or later for the Time Reporting database.
+- SQL Server 2016 or later for the password archive database.
 - To install, you will need a Windows Server running IIS with the
   [ASP.NET Core 10 Hosting Bundle](https://dotnet.microsoft.com/download/dotnet/10.0).
 
@@ -89,25 +95,23 @@ variable holds an Npgsql connection string for a Time Reporting database, for ex
 
 ### Database
 
-**The API provisions its own databases on startup.** All that has to exist beforehand is a
-PostgreSQL server and a login role that may create databases:
+**The API provisions the Time Reporting database on startup, and only that one.** On PostgreSQL,
+create a login role that may create databases:
 
 ```sql
 CREATE ROLE timereporting LOGIN CREATEDB PASSWORD '<a strong password>';
 ```
 
-Point the two connection strings at that role and start the API. `ProvisionDatabasesAsync` in
-`Program.cs` then:
+`MigrateTimeReportingDatabaseAsync` in `Program.cs` then creates the `timereporting` database if the
+server does not have it and applies every outstanding migration, so a first run builds the schema
+and a later deploy picks up new migrations. It is a no-op once the database is current, so restarts
+cost a couple of round trips and log nothing. The `CREATEDB` privilege is only needed for the run
+that creates the database; you can revoke it afterwards with `ALTER ROLE timereporting NOCREATEDB`
+and the API will keep working. Without it, a first run fails fast with `42501: permission denied to
+create database`.
 
-- creates the `timereporting` database if the server does not have it, and applies every outstanding
-  migration — so a first run builds the schema and a later deploy picks up new migrations;
-- creates the `passwordarchive` database from the model if it is missing (see
-  [Password archive database](#password-archive-database)).
-
-Both steps are no-ops once everything is in place, so restarts cost a couple of round trips and log
-nothing. The `CREATEDB` privilege is only needed for the run that creates the databases; you can
-revoke it afterwards with `ALTER ROLE timereporting NOCREATEDB` and the API will keep working.
-Without it, a first run fails fast with `42501: permission denied to create database`.
+**The `PasswordArchive` database on SQL Server has to exist before the API starts.** Nothing in this
+API creates it — see [Password archive database](#password-archive-database).
 
 `InitialCreate` is the whole Time Reporting schema: `CommonTasks`, `TimeEntries` and the `StartTime`
 index. It targets PostgreSQL only — the SQL Server migrations it replaced are in git history, and
@@ -145,18 +149,27 @@ dotnet ef migrations add <Name> --project GMG.TimeReporting.Core --startup-proje
 
 #### Password archive database
 
-Logins are checked against a second database, `passwordarchive`, which belongs to the separate
-security application. EF Core migrations do not own it, so startup uses `EnsureCreated` rather than
-`Migrate`: it builds the database from `PasswordArchiveContext` when the database is missing and
-does nothing at all when it already exists. That means it will not fight the security application
-over a database that app created, but it also means that if this API gets there first, the archive
-is created with only the tables and columns this API models. Where the security application owns
-the archive, let it create the database before the API's first run.
+Logins are checked against a second database, `PasswordArchive`, which lives on **SQL Server** and
+belongs to the separate security application. That application owns the database and its schema
+outright, which is why the archive stayed on SQL Server when Time Reporting moved to PostgreSQL.
+
+**This API never creates the archive and never changes its schema.** `PasswordArchiveContext` is a
+read/write mapping over tables the security application defines, nothing more: startup does not call
+`EnsureCreated` or `Migrate` on it, and it has no migrations. `OnModelCreating` describes the
+existing schema so EF can query it — it is not a definition this API is entitled to apply. If the
+two ever drift, the fix is to update `PasswordArchiveContext` to match the real database, never the
+other way round.
+
+So the archive must already exist, with its schema in place, before the API's first run. Let the
+security application create it, then point `PasswordArchiveConnection` at it. If it is missing,
+login requests fail rather than silently standing up a half-right database.
 
 Remaining setup:
 
-- The API's PostgreSQL role owns the databases it creates, so it already has read and write access.
-  The old EXECUTE grant on the stored procedures is no longer needed — there are none.
+- The API's PostgreSQL role owns the Time Reporting database it creates, so it already has read and
+  write access. The old EXECUTE grant on the stored procedures is no longer needed — there are none.
+- On SQL Server, the API's login needs read and write access to `PasswordArchive`. `db_datareader`
+  and `db_datawriter` are enough — no schema-altering rights are wanted.
 - Add the necessary entry to the security application for logging in (steps not included here).
 - Populate a few common tasks in the CommonTasks table. The titles the retired `GetRecentTasks`
   procedure treated as favourites were: Team meeting, Admin, Daily Scrum, Qualtrax.

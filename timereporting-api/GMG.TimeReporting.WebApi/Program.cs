@@ -28,7 +28,7 @@ builder.Services.AddCors(options =>
 builder.Services.AddDbContext<TimeReportingContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
 builder.Services.AddDbContext<PasswordArchiveContext>(options =>
-    options.UseNpgsql(builder.Configuration.GetConnectionString("PasswordArchiveConnection")));
+    options.UseSqlServer(builder.Configuration.GetConnectionString("PasswordArchiveConnection")));
 
 builder.Services
     .AddAuthentication(options =>
@@ -74,7 +74,7 @@ builder.Services.AddSwaggerGen(c =>
 
 var app = builder.Build();
 
-await ProvisionDatabasesAsync(app);
+await MigrateTimeReportingDatabaseAsync(app);
 
 if (app.Environment.IsDevelopment())
 {
@@ -101,15 +101,21 @@ app.MapControllers();
 app.Run();
 
 /// <summary>
-/// Creates both databases at startup if the PostgreSQL server does not have them yet,
-/// and brings the Time Reporting schema up to the latest migration.
+/// Creates the Time Reporting database at startup if the PostgreSQL server does not have it
+/// yet, and brings its schema up to the latest migration.
 /// </summary>
 /// <remarks>
-/// The login role needs the CREATEDB privilege the first time this runs; afterwards it
-/// only needs access to the two databases. Both calls are no-ops once everything is in
-/// place, so a normal restart costs a couple of round trips.
+/// Only the Time Reporting database is provisioned here. The password archive is a SQL
+/// Server database owned by the separate security application, which is the only thing that
+/// may create it or change its shape; this API reads and writes its rows and nothing more.
+/// Do not add an EnsureCreated or Migrate call for <see cref="PasswordArchiveContext"/> —
+/// either one would let this API define a schema that is not its to define.
+///
+/// The PostgreSQL login role needs the CREATEDB privilege the first time this runs;
+/// afterwards it only needs access to the database it created. The call is a no-op once the
+/// database is in place, so a normal restart costs a couple of round trips.
 /// </remarks>
-static async Task ProvisionDatabasesAsync(WebApplication app)
+static async Task MigrateTimeReportingDatabaseAsync(WebApplication app)
 {
     using var scope = app.Services.CreateScope();
     var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
@@ -126,14 +132,4 @@ static async Task ProvisionDatabasesAsync(WebApplication app)
 
     // Creates the database first if it is missing, then applies whatever is outstanding.
     await timeReporting.Database.MigrateAsync();
-
-    // The password archive has no migrations of its own — the schema belongs to the
-    // separate security application. EnsureCreated builds it from the model when the
-    // database is missing and does nothing whatsoever when it already exists, so it
-    // will not fight with the security application over a database that app created.
-    var passwordArchive = scope.ServiceProvider.GetRequiredService<PasswordArchiveContext>();
-    if (await passwordArchive.Database.EnsureCreatedAsync())
-    {
-        logger.LogInformation("Created the password archive database from the model.");
-    }
 }
