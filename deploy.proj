@@ -16,10 +16,14 @@
     FolderProfile to $(ApiDeployDir). Both destinations are defined in
     Directory.Build.props and can be overridden on the command line:
 
-        dotnet msbuild deploy.proj -p:SiteRoot=\\DARMIK\Web\staging\timereporting
+        dotnet msbuild deploy.proj -p:SiteRoot=\DARMIK\Web\staging\timereporting
 
     The UI goes first. The API lives in a folder beneath the UI's root, so publishing it
     second means a half-finished UI copy can never land on top of a fresh API.
+
+    To push only the API, without rebuilding the UI:
+
+        dotnet msbuild deploy.proj -t:DeployApi
   -->
 
   <PropertyGroup>
@@ -28,12 +32,22 @@
     <UiDirectory>timereporting-ui</UiDirectory>
     <!-- Matches build.outDir in vite.config.ts and BuildOutputFolder in the esproj. -->
     <UiBuildOutput>$(UiDirectory)\dist\TimeReporting</UiBuildOutput>
+    <AppOfflineFile>$(ApiDeployDir)\app_offline.htm</AppOfflineFile>
+    <!-- Seconds to let the ASP.NET Core Module notice app_offline.htm and unload. -->
+    <AppOfflineWaitSeconds Condition="'$(AppOfflineWaitSeconds)' == ''">3</AppOfflineWaitSeconds>
   </PropertyGroup>
 
-  <Target Name="Deploy" DependsOnTargets="PublishUi;PublishApi">
+  <Target Name="Deploy" DependsOnTargets="PublishUi;DeployApi">
     <Message Importance="high" Text="Deployed UI to $(UiDeployDir)" />
     <Message Importance="high" Text="Deployed API to $(ApiDeployDir)" />
   </Target>
+
+  <!--
+    The API half on its own: take the app down, publish, check what landed, bring it back.
+    Named separately so `-t:DeployApi` is a supported way to push a server-side fix without
+    waiting on an npm build.
+  -->
+  <Target Name="DeployApi" DependsOnTargets="PublishApi;VerifyApi;StartApi" />
 
   <!-- Only on a clone that has never installed; `npm ci` on every deploy would be slow. -->
   <Target Name="RestoreUi" Condition="!Exists('$(UiDirectory)\node_modules')">
@@ -65,7 +79,35 @@
            Text="Copying the UI to $(UiDeployDir) failed (robocopy exit code $(RobocopyExitCode))." />
   </Target>
 
-  <Target Name="PublishApi">
+  <!--
+    The API runs in-process, so w3wp has its assemblies loaded and locked. Publishing over a
+    running application fails partway through with "the process cannot access the file", and
+    what is left behind is a half-written folder - which is exactly how a deployment loses,
+    say, its web.config and starts serving 404s. app_offline.htm is the one lever that works
+    over a file share with no rights on the server itself: the ASP.NET Core Module sees it,
+    shuts the application down, releases the files, and serves the page below meanwhile.
+  -->
+  <Target Name="StopApi">
+    <MakeDir Directories="$(ApiDeployDir)" />
+    <Message Importance="high" Text="Taking the API offline..." />
+    <WriteLinesToFile File="$(AppOfflineFile)"
+                      Lines="&lt;html&gt;&lt;head&gt;&lt;title&gt;Updating&lt;/title&gt;&lt;/head&gt;&lt;body&gt;&lt;h1&gt;The Time Reporting API is being updated.&lt;/h1&gt;&lt;p&gt;Please try again in a moment.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;"
+                      Overwrite="true" />
+    <!-- The module polls for the file, so give it a moment before overwriting assemblies. -->
+    <Exec Command="powershell -NoProfile -NonInteractive -Command &quot;Start-Sleep -Seconds $(AppOfflineWaitSeconds)&quot;" />
+  </Target>
+
+  <!--
+    Deleting app_offline.htm is what lets the application start again, on the next request.
+    PublishApi calls this from OnError as well, so a failed publish does not leave the API
+    switched off.
+  -->
+  <Target Name="StartApi">
+    <Message Importance="high" Text="Bringing the API back online..." />
+    <Delete Files="$(AppOfflineFile)" />
+  </Target>
+
+  <Target Name="PublishApi" DependsOnTargets="StopApi">
     <Message Importance="high" Text="Publishing API to $(ApiDeployDir)..." />
     <!--
       The MSBuild task rather than `dotnet publish`, so PublishDir's trailing separator is
@@ -77,6 +119,22 @@
     <MSBuild Projects="$(ApiProject)"
              Targets="Publish"
              Properties="Configuration=$(Configuration);PublishProfile=FolderProfile;PublishDir=$(ApiDeployDir)\" />
+    <OnError ExecuteTargets="StartApi" />
+  </Target>
+
+  <!--
+    web.config is what maps every request under the /api application to AspNetCoreModuleV2.
+    Without it IIS treats the folder as static content and answers each API call with its own
+    404 - no ASP.NET Core error page, nothing in the application log, and a UI that merely
+    looks broken. The publish generates the file, so a missing one means the copy did not
+    finish; failing here says so plainly instead of leaving it to be found in production.
+  -->
+  <Target Name="VerifyApi">
+    <Error Condition="!Exists('$(ApiDeployDir)\web.config')"
+           Text="No web.config in $(ApiDeployDir). IIS will serve that folder as static files and every API call will return 404. Re-run the publish and check the folder is writable." />
+    <Error Condition="!Exists('$(ApiDeployDir)\GMG.TimeReporting.WebApi.dll')"
+           Text="No GMG.TimeReporting.WebApi.dll in $(ApiDeployDir). The publish did not complete." />
+    <Message Importance="high" Text="Verified web.config and application assembly in $(ApiDeployDir)." />
   </Target>
 
 </Project>
