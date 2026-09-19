@@ -90,6 +90,16 @@ dotnet user-secrets set "Jwt:Key" "<a long random value>" --project GMG.TimeRepo
 dotnet user-secrets set "ConnectionStrings:DefaultConnection" "<connection string>" --project GMG.TimeReporting.WebApi
 ```
 
+Every connection string ends with an `Application Name` naming the file it was written in — for
+example `Application Name=appsettings.Development.json`. Configuration arrives from several places
+at once and the file in source control is the one least likely to be winning, so the tag is echoed
+in the startup log (see [Logging](#logging)) and answers "which one is actually in use" at a
+glance. Both providers treat it as an ordinary keyword, so it changes nothing about the
+connection; PostgreSQL reports it in `pg_stat_activity.application_name` and SQL Server in
+`sys.dm_exec_sessions.program_name`. **Keep the tag when you override a connection string** — a
+user secret or an app pool environment variable should carry its own, naming that source, or the
+startup line goes out untagged where it is needed most.
+
 ### Tests
 
 ```cmd
@@ -258,7 +268,10 @@ own directory. One-time setup:
     repository's `Directory.Build.props`, by default
     `\\DARMIK\Web\gmgdesk.com\timereporting\api`. Create the folder if it does not exist yet.
 - Set the application pool's environment variables for the connection strings and the JWT
-  signing key (see [Configuration](#configuration)).
+  signing key (see [Configuration](#configuration)). End each connection string with an
+  `Application Name` naming its source — `Application Name=app pool environment` — so the
+  startup log shows that the environment variable won rather than the deployed
+  `appsettings.json`.
 
 To deploy, run this from the repository root — it publishes the API *and* the UI:
 
@@ -352,6 +365,20 @@ application pool identity needs write access to that folder.** If it cannot writ
 drops the file sink silently — the app still starts and still logs to the console, which is easy
 to mistake for "nothing is being logged". The folder is created on first write; `logs` is in
 `.gitignore`, so local runs leave nothing to commit.
+
+Startup logs both connection strings as the application resolved them, so a connection failure does
+not have to be diagnosed by guesswork:
+
+```
+Time Reporting connection: host=localhost;port=5433;database=timereporting;username=***;password=***;application name=appsettings.Development.json
+```
+
+`MaskCredentials` in `Program.cs` replaces the username and password with `***` first, because the
+file sink keeps a month of these on the deployment share and anyone who can read that folder would
+otherwise be able to read the databases. Empty values are left alone rather than shown as `***`, so
+a string relying on integrated security does not appear to carry credentials it does not have, and
+a string that will not parse logs as `(unparseable)` rather than falling back to printing it raw.
+Keys come out lowercased because the masking goes through `DbConnectionStringBuilder`.
 
 `UseSerilogRequestLogging` collapses each request into a single summary line — method, path,
 status code, elapsed milliseconds, and the authenticated username where there is one — instead
