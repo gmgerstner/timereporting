@@ -56,11 +56,27 @@ namespace GMG.TimeReporting.WebApi.Controllers
                 return BadRequest();
             }
 
-            var owner = await passwordArchiveContext.Passwords
+//#if !DEBUG
+            Password? owner = await passwordArchiveContext.Passwords
                 .AsNoTracking()
                 .Where(p => p.Url == TimeReportingUrl)
                 .Where(p => p.Username!.ToLower() == username)
                 .SingleOrDefaultAsync(cancellationToken);
+//#else
+//            // This is a temporary bypass for development. It allows logging in with any username
+//            // and password, which is convenient for testing. It should be removed before production.
+//            if (login.Password != "george")
+//            {
+//                return BadRequest();
+//            }
+//            Password? owner = new Password
+//            {
+//                Url = TimeReportingUrl,
+//                Username = username,
+//                PasswordValue = "dev"
+//            };
+//#endif
+
 
             if (owner is null || !PasswordMatches(owner.PasswordValue, login.Password))
             {

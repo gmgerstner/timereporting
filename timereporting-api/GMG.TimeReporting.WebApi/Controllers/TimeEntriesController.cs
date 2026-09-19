@@ -1,4 +1,5 @@
 using GMG.TimeReporting.Core.TimeReportingData;
+using GMG.TimeReporting.WebApi.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -156,6 +157,60 @@ namespace GMG.TimeReporting.WebApi.Controllers
 
             var sheet = await context.GetDailyTimesheetAsync(userId, WorkDate, cancellationToken);
             return sheet.ToList();
+        }
+
+        /// <summary>
+        /// Everything the dashboard plots over a date range, for the signed-in user or — for
+        /// an admin passing <paramref name="UserId"/> — for someone else.
+        /// </summary>
+        /// <remarks>
+        /// Both breakdowns come back together because they are two readings of a single scan
+        /// of the same rows, shown side by side against one date range.
+        /// </remarks>
+        [HttpGet]
+        [Route("GetRangeSummary")]
+        public async Task<ActionResult<RangeSummary>> GetRangeSummary(DateTime? From, DateTime? To, int? UserId, CancellationToken cancellationToken)
+        {
+            if (ResolveReadTarget(UserId) is not int userId) return Forbid();
+
+            if (!DateRange.TryResolve(From, To, out var range, out var error))
+            {
+                return BadRequest(error);
+            }
+
+            var days = await context.GetRangeTimesheetAsync(userId, range.From, range.To, cancellationToken);
+
+            // A day that is present but still running sums to zero, which is the same number
+            // a day with no entries at all shows. Only the presence of a row counts as logged.
+            var hoursByDay = days.ToDictionary(
+                day => day.Date,
+                day => day.Entries.Sum(entry => entry.TotalHours ?? 0m));
+
+            var titleTotals = days
+                .SelectMany(day => day.Entries)
+                .GroupBy(entry => entry.Title, StringComparer.Ordinal)
+                .Select(group => new TitleTotal
+                {
+                    Title = group.Key,
+                    TotalHours = group.Sum(entry => entry.TotalHours ?? 0m)
+                })
+                .OrderByDescending(total => total.TotalHours)
+                .ThenBy(total => total.Title, StringComparer.Ordinal)
+                .ToList();
+
+            return new RangeSummary
+            {
+                TotalHours = hoursByDay.Values.Sum(),
+                DaysLogged = days.Count,
+                DailyTotals = range.EnumerateDays()
+                    .Select(day => new DailyTotal
+                    {
+                        Date = day,
+                        TotalHours = hoursByDay.GetValueOrDefault(day)
+                    })
+                    .ToList(),
+                TitleTotals = titleTotals
+            };
         }
 
         [HttpGet]

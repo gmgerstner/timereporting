@@ -93,6 +93,71 @@ namespace GMG.TimeReporting.Core.TimeReportingData
         }
 
         /// <summary>
+        /// Hours booked per task title, bucketed by user and work day, across a date range.
+        /// </summary>
+        /// <param name="userId">
+        /// The user to report on, or <c>null</c> for every user. Only the admin-only reports
+        /// endpoint asks for every user.
+        /// </param>
+        /// <param name="from">First work day, inclusive.</param>
+        /// <param name="to">Last work day, inclusive.</param>
+        public async Task<IReadOnlyList<UserDaySummary>> GetRangeTimesheetAsync(
+            int? userId,
+            DateTime from,
+            DateTime to,
+            CancellationToken cancellationToken = default)
+        {
+            var firstDay = from.Date;
+
+            // Half-open at the top. GetDailyTimesheetAsync's upper bound is inclusive, kept
+            // that way for parity with the original procedure, but reusing that here would
+            // let neighbouring days overlap and count the boundary entry on both of them.
+            var dayAfterLast = to.Date.AddDays(1);
+
+            var query = TimeEntries
+                .AsNoTracking()
+                .Where(te => te.StartTime >= firstDay && te.StartTime < dayAfterLast);
+
+            if (userId is int singleUser)
+            {
+                query = query.Where(te => te.UserId == singleUser);
+            }
+
+            var entries = await query
+                .OrderBy(te => te.StartTime)
+                .ThenBy(te => te.TimeEntryId)
+                .ToListAsync(cancellationToken);
+
+            return SummariseRange(entries);
+        }
+
+        /// <summary>
+        /// The in-memory half of <see cref="GetRangeTimesheetAsync"/>, separated so the
+        /// bucketing rules can be exercised without a database.
+        /// </summary>
+        public static IReadOnlyList<UserDaySummary> SummariseRange(IReadOnlyList<TimeEntry> entries)
+        {
+            // SummariseTimesheet closes an open entry with the next entry's start time, which
+            // only means anything inside one person's one day. Grouping first is what stops
+            // Monday's last entry being closed by Tuesday's first, or Alice's by Bob's.
+            return entries
+                .GroupBy(te => (te.UserId, Date: te.StartTime.Date))
+                .Select(group => new UserDaySummary
+                {
+                    UserId = group.Key.UserId,
+                    Date = group.Key.Date,
+                    Entries = SummariseTimesheet(
+                        group
+                            .OrderBy(te => te.StartTime)
+                            .ThenBy(te => te.TimeEntryId)
+                            .ToList())
+                })
+                .OrderBy(summary => summary.UserId)
+                .ThenBy(summary => summary.Date)
+                .ToList();
+        }
+
+        /// <summary>
         /// Task titles ordered by how recently they were last started, with the favourite
         /// titles pinned to the top.
         /// </summary>
@@ -171,6 +236,18 @@ namespace GMG.TimeReporting.Core.TimeReportingData
             public string Title { get; set; } = string.Empty;
 
             public DateTime LastStarted { get; set; }
+        }
+
+        /// <summary>
+        /// One user's hours for one work day, broken down by task title.
+        /// </summary>
+        public class UserDaySummary
+        {
+            public int UserId { get; set; }
+
+            public DateTime Date { get; set; }
+
+            public IReadOnlyList<TimeSheetEntry> Entries { get; set; } = [];
         }
     }
 }

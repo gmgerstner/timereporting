@@ -1,9 +1,9 @@
 import { Button, Container, Nav, Navbar } from 'react-bootstrap';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/useAuth';
 
 export function NavBar() {
-  const { username, isAuthenticated, logout } = useAuth();
+  const { username, isAuthenticated, isAdmin, logout } = useAuth();
   const navigate = useNavigate();
 
   const onLogout = () => {
@@ -19,7 +19,23 @@ export function NavBar() {
         </Navbar.Brand>
         <Navbar.Toggle aria-controls="main-navbar" />
         <Navbar.Collapse id="main-navbar">
-          <Nav className="me-auto mb-2 mb-lg-0" />
+          <Nav className="me-auto mb-2 mb-lg-0">
+            {isAuthenticated && (
+              <>
+                <Nav.Link as={NavLink} to="/" end>
+                  Dashboard
+                </Nav.Link>
+                <Nav.Link as={NavLink} to="/timesheet">
+                  Timesheet
+                </Nav.Link>
+                {isAdmin && (
+                  <Nav.Link as={NavLink} to="/reports">
+                    Reports
+                  </Nav.Link>
+                )}
+              </>
+            )}
+          </Nav>
           <div className="d-flex align-items-center gap-2">
             <span className="navbar-text">{username.toUpperCase()}</span>
             {isAuthenticated && (

@@ -1,5 +1,13 @@
 import { config } from '../config';
-import type { LoginCredentials, TimeEntry, TimeSheetEntry, User, UserSummary } from '../models';
+import type {
+  LoginCredentials,
+  RangeSummary,
+  TimeEntry,
+  TimeSheetEntry,
+  User,
+  UserHours,
+  UserSummary,
+} from '../models';
 import { toLocalISODateTimeString } from '../utils/time';
 import { getToken } from './storage';
 
@@ -87,6 +95,23 @@ export const api = {
   /** Admin-only: everyone who has logged in at least once. */
   getUsers(): Promise<UserSummary[]> {
     return request<UserSummary[]>('/Users/GetUsers');
+  },
+
+  /**
+   * Both dashboard breakdowns for a date range. Admins may pass another user's id.
+   * Dates are local "yyyy-MM-dd" strings.
+   */
+  getRangeSummary(from: string, to: string, userId?: number | null): Promise<RangeSummary> {
+    return request<RangeSummary>('/TimeEntries/GetRangeSummary', {
+      query: { From: from, To: to, UserId: userId },
+    });
+  },
+
+  /** Admin-only: hours per person over a date range. */
+  getHoursByUser(from: string, to: string): Promise<UserHours[]> {
+    return request<UserHours[]>('/Reports/GetHoursByUser', {
+      query: { From: from, To: to },
+    });
   },
 
   getTimeEntry(id: number): Promise<TimeEntry> {
